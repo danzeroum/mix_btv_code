@@ -312,3 +312,34 @@ módulos-folha (memory/routing/chains/utils/sandbox), onda 2 `BaseAgent` +
 `orchestrator.py`, `safe_agent_base.py`, `squad_orchestrator.py` e
 `continuous_eval.py` ficam fora do porte; `rag_tool.py`/`mcp_server.py`
 adiados para a Fase 6.
+
+## Fase 4 — Onda 1 portada: módulos-folha do squad (2026-07-05)
+
+Antes de portar, a mesma checagem de "tem chamador real?" aplicada no ADR
+0004 foi repetida para o material da Onda 1. Achado: `utils/observability.py`,
+`utils/tool_utils.py` e `safety/guardrails.py` **não têm importador algum**
+em lugar nenhum do BuildToValue de origem — nem no `UnifiedOrchestrator`,
+nem nos 5 agentes, nem no demo `main.py` (confirmado por leitura direta dos
+7 arquivos, já que a busca por código do GitHub voltou resultados
+inconsistentes com índice provavelmente desatualizado logo após o merge).
+Mesmo padrão do `safe_agent_base.py` descartado: código órfão, não portado.
+`utils/memory_utils.py::MemoryStore` só é usado pelo demo `main.py` — também
+ficou de fora. Achado extra relevante: `agents/developer_agent.py` importa
+`from buildtovalue import BuildToValueReviewSystem` — acoplamento direto ao
+review system (Fase 5) dentro de um agente da Fase 4; fica registrado para a
+Onda 2 resolver (stub/adiar a chamada de review até `forge_review` existir).
+
+Portado para `forge_squad` (com testes, 17 novos, 36 no total do workspace
+Python): `security.py` (`SecurityConfig` — confirmado dependência real via
+`secure_executor.py`, importado pelo `UnifiedOrchestrator` através do
+sandbox), `sandbox.py` (`SecureToolSandbox` + `DockerSandbox` stub — Docker
+de verdade é Fase 6), `memory.py` (`AgentMemorySystem`, diretório de
+armazenamento renomeado de `.buildtoflip/ledger` para a convenção `.forge/`
+do resto da plataforma), `forgetting.py` (`IntelligentForgetting` +
+`MemoryStore`), `routing.py` (`LearningRouter`), `chains.py` (`ChainStep` +
+`ResilientPromptChain`). Um bug de código morto da fonte original foi
+identificado e documentado (não corrigido, só registrado): em
+`SecureToolSandbox._validate_security`, o `ValueError` de
+`_validate_params_safety` é inalcançável, porque `SecurityConfig.validate_tool_call`
+já varre a mesma lista `FORBIDDEN_PATTERNS` contra `str(params)` primeiro e
+sempre levanta `SecurityError` antes.
