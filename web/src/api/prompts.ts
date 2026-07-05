@@ -10,8 +10,10 @@ export const GENERATORS: PromptGenerator[] = [
 ]
 
 let library: SavedPrompt[] = [
-  { id: '1', name: 'review rigoroso', favorite: false, generator: 'code-review', tags: ['rust'] },
-  { id: '2', name: 'commit convencional', favorite: true, generator: 'commit-msg', tags: ['git'] },
+  { id: '1', name: 'review-seguranca', favorite: false, generator: 'code-review', tags: ['rust', 'security'] },
+  { id: '2', name: 'review-diff-rapido', favorite: true, generator: 'code-review', tags: ['rust'] },
+  { id: '3', name: 'pytest-edge', favorite: true, generator: 'test-gen', tags: ['python'] },
+  { id: '4', name: 'commit-conv', favorite: false, generator: 'commit-msg', tags: ['git'] },
 ]
 
 /** // TODO: backend Fase 5 — chama forge_promptforge via CoreService.Generate (gRPC), nunca LLM direto. */

@@ -8,7 +8,7 @@ export let SKILLS: SkillEntry[] = [
   { id: 'k6-load', status: 'em_analise', detail: 'teste de carga k6' },
 ]
 
-export const MCP_SERVERS: McpServer[] = [
+export let MCP_SERVERS: McpServer[] = [
   { id: 'filesystem', status: 'ok' },
   { id: 'git', status: 'ok' },
   { id: 'postgres', status: 'pendente' },
@@ -45,5 +45,14 @@ export async function togglePermissionCell(tool: string, profile: 'build' | 'pla
   )
   const found = PERMISSION_MATRIX.find((r) => r.tool === tool)
   if (!found) throw new Error('ferramenta não encontrada')
+  return found
+}
+
+/** // TODO: backend Fase 5 — reconecta o servidor MCP real via forge-tools, atualiza a saúde do sidecar. */
+export async function reconnectMcp(id: string): Promise<McpServer> {
+  await simulateLatency(400)
+  MCP_SERVERS = MCP_SERVERS.map((s) => (s.id === id ? { ...s, status: 'ok' } : s))
+  const found = MCP_SERVERS.find((s) => s.id === id)
+  if (!found) throw new Error('servidor MCP não encontrado')
   return found
 }

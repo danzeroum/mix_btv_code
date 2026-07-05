@@ -6,7 +6,17 @@ export interface TableColumn<T> {
   render: (row: T) => ReactNode
 }
 
-export function Table<T>({ columns, rows, rowKey }: { columns: TableColumn<T>[]; rows: T[]; rowKey: (row: T) => string }) {
+export function Table<T>({
+  columns,
+  rows,
+  rowKey,
+  onRowClick,
+}: {
+  columns: TableColumn<T>[]
+  rows: T[]
+  rowKey: (row: T) => string
+  onRowClick?: (row: T) => void
+}) {
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
@@ -32,7 +42,11 @@ export function Table<T>({ columns, rows, rowKey }: { columns: TableColumn<T>[];
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={rowKey(row)}>
+          <tr
+            key={rowKey(row)}
+            onClick={onRowClick ? () => onRowClick(row) : undefined}
+            style={onRowClick ? { cursor: 'pointer' } : undefined}
+          >
             {columns.map((c) => (
               <td key={c.key} style={{ padding: '6px 10px', borderBottom: '1px solid var(--line)' }}>
                 {c.render(row)}

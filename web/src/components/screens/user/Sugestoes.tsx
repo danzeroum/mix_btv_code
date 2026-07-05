@@ -1,14 +1,15 @@
 import { Card } from '../../primitives/Card'
 import { Button } from '../../primitives/Button'
 import { useAppDispatch } from '../../../state/AppContext'
+import type { ScreenId } from '../../../types/domain'
 
-const PROPOSALS = [
-  { title: 'Revisor de diff', tag: 'review', desc: 'inspeciona cada diff antes de aplicar.', anchor: 'ancora: forge-cli tool.edit' },
-  { title: 'Replay de sessão', tag: 'auditoria', desc: 'reproduz uma sessão a partir do ledger.', anchor: 'ancora: ledger hash-chain + sessions.db' },
-  { title: 'Aprovação em lote', tag: 'permissão', desc: 'aprova várias permissões pendentes de uma vez.', anchor: 'ancora: forge-core PermissionClient' },
-  { title: 'Modo watch', tag: 'sessão', desc: 'observa arquivos e sugere ações automaticamente.', anchor: 'ancora: forge-cli watch (futuro)' },
-  { title: 'A/B de prompts', tag: 'promptforge', desc: 'compara variações de prompt lado a lado.', anchor: 'ancora: forge_promptforge.hashing' },
-  { title: 'Mapa de memória do squad', tag: 'squad', desc: 'visualiza o que cada agente lembra.', anchor: 'ancora: forge_squad.memory / forgetting' },
+const PROPOSALS: { title: string; tag: string; desc: string; anchor: string; relatedScreen: ScreenId }[] = [
+  { title: 'Revisor de diff', tag: 'review', desc: 'inspeciona cada diff antes de aplicar.', anchor: 'ancora: forge-cli tool.edit', relatedScreen: 'sessao' },
+  { title: 'Replay de sessão', tag: 'auditoria', desc: 'reproduz uma sessão a partir do ledger.', anchor: 'ancora: ledger hash-chain + sessions.db', relatedScreen: 'ledger' },
+  { title: 'Aprovação em lote', tag: 'permissão', desc: 'aprova várias permissões pendentes de uma vez.', anchor: 'ancora: forge-core PermissionClient', relatedScreen: 'permissao' },
+  { title: 'Modo watch', tag: 'sessão', desc: 'observa arquivos e sugere ações automaticamente.', anchor: 'ancora: forge-cli watch (futuro)', relatedScreen: 'sessao' },
+  { title: 'A/B de prompts', tag: 'promptforge', desc: 'compara variações de prompt lado a lado.', anchor: 'ancora: forge_promptforge.hashing', relatedScreen: 'prompts' },
+  { title: 'Mapa de memória do squad', tag: 'squad', desc: 'visualiza o que cada agente lembra.', anchor: 'ancora: forge_squad.memory / forgetting', relatedScreen: 'squad' },
 ]
 
 export function Sugestoes() {
@@ -28,14 +29,21 @@ export function Sugestoes() {
 
       <div className="grid grid-3">
         {PROPOSALS.map((p) => (
-          <Card key={p.title}>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <strong>{p.title}</strong>
-              <span style={{ fontSize: 11, color: 'var(--teal)' }}>{p.tag}</span>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--muted)' }}>{p.desc}</p>
-            <div style={{ fontSize: 11, color: 'var(--faint)' }}>{p.anchor}</div>
-          </Card>
+          <button
+            key={p.title}
+            onClick={() => dispatch({ type: 'SET_SCREEN', screen: p.relatedScreen })}
+            style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer' }}
+            title={`ir para a tela relacionada`}
+          >
+            <Card>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <strong>{p.title}</strong>
+                <span style={{ fontSize: 11, color: 'var(--teal)' }}>{p.tag}</span>
+              </div>
+              <p style={{ fontSize: 13, color: 'var(--muted)' }}>{p.desc}</p>
+              <div style={{ fontSize: 11, color: 'var(--faint)' }}>{p.anchor}</div>
+            </Card>
+          </button>
         ))}
       </div>
     </div>

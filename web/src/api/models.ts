@@ -7,6 +7,12 @@ export const MODEL_TIERS: ModelTier[] = [
   { id: 'large', models: 'claude-sonnet-5 · opus', label: '' },
 ]
 
+/** Nome do modelo primário de um tier, para exibir no cabeçalho da sessão (ex.: "claude-sonnet-5 · opus" -> "claude-sonnet-5"). */
+export function primaryModelName(tier: ModelTierId): string {
+  const found = MODEL_TIERS.find((t) => t.id === tier)
+  return found ? found.models.split(' · ')[0] : tier
+}
+
 export const AUTONOMY_LEVELS: { id: AutonomyLevel; label: string; enabled: boolean }[] = [
   { id: 'interativo', label: 'Interativo', enabled: true },
   { id: 'automatico', label: 'Automático (em dev)', enabled: false },

@@ -37,7 +37,7 @@ export function NodeView({
         height: h,
         borderRadius: node.kind === 'pill' ? 16 : 10,
         borderWidth: 1,
-        borderColor: pending ? 'var(--amber)' : selected ? 'var(--line2)' : 'var(--line)',
+        borderColor: pending ? 'var(--amber)' : selected ? node.color : 'var(--line)',
         background: 'var(--panel2)',
         color: 'var(--ink)',
         boxShadow: glow,

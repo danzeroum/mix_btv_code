@@ -12,6 +12,7 @@ export function Ledger() {
   const toast = useToast()
   const [entries, setEntries] = useState<LedgerEntry[]>([])
   const [actorFilter, setActorFilter] = useState<string>('todos')
+  const [selected, setSelected] = useState<LedgerEntry | null>(null)
   const verify = useAsyncAction(verifyChain)
 
   useEffect(() => {
@@ -63,6 +64,7 @@ export function Ledger() {
       <Table
         rowKey={(e) => String(e.seq)}
         rows={rows}
+        onRowClick={(e) => setSelected(e)}
         columns={[
           { key: 'seq', header: 'seq', render: (e) => e.seq },
           { key: 'ts', header: 'ts', render: (e) => <span className="mono">{e.ts}</span> },
@@ -72,6 +74,23 @@ export function Ledger() {
           { key: 'flag', header: 'flags', render: (e) => (e.flag ? <Badge color="var(--wire)">{e.flag}</Badge> : '') },
         ]}
       />
+
+      {selected && (
+        <Card accentBorder="var(--line2)">
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <strong>entrada #{selected.seq}</strong>
+            <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)' }}>
+              ✕ fechar
+            </button>
+          </div>
+          <pre
+            className="mono"
+            style={{ background: '#0a0d12', border: '1px solid var(--line)', borderRadius: 6, padding: 8, fontSize: 11, marginTop: 8 }}
+          >
+            {JSON.stringify(selected, null, 2)}
+          </pre>
+        </Card>
+      )}
     </div>
   )
 }

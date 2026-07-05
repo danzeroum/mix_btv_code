@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, type Dispatch, type ReactNode } from 'react'
-import type { Persona, ScreenId } from '../types/domain'
+import type { AgentProfile, ModelTierId, Persona, ScreenId } from '../types/domain'
 import { ACCENT_STORAGE_KEY, THEME_STORAGE_KEY, type ThemeId } from '../styles/themes'
 import { DEFAULT_SCREEN, screenBelongsToPersona } from '../lib/nav'
 
@@ -8,6 +8,9 @@ export interface AppState {
   screen: ScreenId
   theme: ThemeId
   accent: string | null
+  /** Selecionados na tela `modelo`; a tela `sessao` lê daqui para o cabeçalho da sessão (README §6 "modelo"). */
+  modelTier: ModelTierId
+  agentProfile: AgentProfile
 }
 
 export type AppAction =
@@ -15,6 +18,8 @@ export type AppAction =
   | { type: 'SET_SCREEN'; screen: ScreenId }
   | { type: 'SET_THEME'; theme: ThemeId }
   | { type: 'SET_ACCENT'; accent: string | null }
+  | { type: 'SET_MODEL_TIER'; tier: ModelTierId }
+  | { type: 'SET_AGENT_PROFILE'; profile: AgentProfile }
 
 function readPersisted(): Pick<AppState, 'theme' | 'accent'> {
   try {
@@ -29,7 +34,7 @@ function readPersisted(): Pick<AppState, 'theme' | 'accent'> {
 
 function initState(): AppState {
   const { theme, accent } = readPersisted()
-  return { persona: 'user', screen: DEFAULT_SCREEN.user, theme, accent }
+  return { persona: 'user', screen: DEFAULT_SCREEN.user, theme, accent, modelTier: 'large', agentProfile: 'build' }
 }
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -57,6 +62,10 @@ function reducer(state: AppState, action: AppAction): AppState {
         // ok ignorar
       }
       return { ...state, accent: action.accent }
+    case 'SET_MODEL_TIER':
+      return { ...state, modelTier: action.tier }
+    case 'SET_AGENT_PROFILE':
+      return { ...state, agentProfile: action.profile }
   }
 }
 

@@ -89,13 +89,31 @@ mod tests {
         telemetry
     }
 
-    /// Fixture mínima de `web/dist`: um `index.html` só para os testes não
-    /// dependerem do build real da SPA nem do diretório de trabalho do CI.
+    /// Fixture de `web/dist` com estrutura aninhada (não só um `index.html`
+    /// solto) — exercita o `ServeDir` real: subpasta `assets/` com JS/CSS e
+    /// um `favicon.svg` na raiz, para pegar bugs de content-type e de
+    /// arquivo-real-vence-fallback que uma fixture trivial não pegaria.
     fn fixture_web_dir() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("index.html"),
             "<html><body>forge</body></html>",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("assets")).unwrap();
+        std::fs::write(
+            dir.path().join("assets").join("app-abc123.js"),
+            "console.log('forge')",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("assets").join("app-abc123.css"),
+            "body { color: red; }",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("favicon.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
         )
         .unwrap();
         dir
@@ -170,5 +188,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn asset_aninhado_e_servido_com_content_type_correto() {
+        let web_dir = fixture_web_dir();
+        let app = router(Telemetry::open_in_memory().unwrap(), web_dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/assets/app-abc123.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let content_type = resp
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            content_type.contains("javascript"),
+            "esperava content-type de JS, veio {content_type}"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"console.log('forge')");
+    }
+
+    #[tokio::test]
+    async fn favicon_real_na_raiz_nao_e_engolido_pelo_fallback_da_spa() {
+        let web_dir = fixture_web_dir();
+        let app = router(Telemetry::open_in_memory().unwrap(), web_dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/favicon.svg")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let content_type = resp
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            content_type.contains("svg"),
+            "esperava content-type de SVG (arquivo real), veio {content_type} — indício de ter caído no fallback de index.html"
+        );
     }
 }

@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { Card } from '../../primitives/Card'
 import { useToast } from '../../primitives/Toast'
+import { useAppDispatch, useAppState } from '../../../state/AppContext'
 import { AUTONOMY_LEVELS, MODEL_TIERS, selectAgentProfile, selectAutonomy, selectTier } from '../../../api/models'
-import type { AgentProfile, AutonomyLevel, ModelTierId } from '../../../types/domain'
+import type { AutonomyLevel } from '../../../types/domain'
 
 export function Modelo() {
   const toast = useToast()
-  const [tier, setTier] = useState<ModelTierId>('large')
-  const [agent, setAgent] = useState<AgentProfile>('build')
+  const dispatch = useAppDispatch()
+  const { modelTier: tier, agentProfile: agent } = useAppState()
   const [autonomy, setAutonomy] = useState<AutonomyLevel>('interativo')
 
   return (
@@ -18,7 +19,7 @@ export function Modelo() {
           <Card key={t.id} accentBorder={t.id === tier ? 'var(--rust)' : undefined}>
             <button
               onClick={() => {
-                setTier(t.id)
+                dispatch({ type: 'SET_MODEL_TIER', tier: t.id })
                 void selectTier(t.id).then(() => toast.push('success', `tier ${t.id} selecionado`))
               }}
               style={{ background: 'transparent', border: 'none', textAlign: 'left', width: '100%', color: 'var(--ink)' }}
@@ -41,7 +42,7 @@ export function Modelo() {
             <Card key={p} accentBorder={p === agent ? 'var(--ok)' : undefined} style={{ flex: 1 }}>
               <button
                 onClick={() => {
-                  setAgent(p)
+                  dispatch({ type: 'SET_AGENT_PROFILE', profile: p })
                   void selectAgentProfile(p).then(() => toast.push('success', `agente ${p} ativo`))
                 }}
                 style={{ background: 'transparent', border: 'none', width: '100%', textAlign: 'left', color: 'var(--ink)' }}

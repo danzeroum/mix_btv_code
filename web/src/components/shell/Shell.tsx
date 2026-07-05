@@ -3,6 +3,7 @@ import { useAppState } from '../../state/AppContext'
 import { useTheme } from '../../state/useTheme'
 import { Topbar } from './Topbar'
 import { Sidebar } from './Sidebar'
+import { WindowChrome } from './WindowChrome'
 import { SCREEN_META } from '../../lib/screenMeta'
 import { SCREEN_COMPONENTS } from '../../lib/screenComponents'
 
@@ -23,14 +24,20 @@ export function Shell() {
       <div className="forge-body">
         <Sidebar />
         <main className={`forge-stage ${stageClass}`} style={{ position: 'relative' }}>
-          <div className="screen-header">
-            <div>
-              <div className="screen-kicker">{meta.kicker}</div>
-              <h1 className="screen-title">{meta.title}</h1>
+          <WindowChrome icon={meta.chromeIcon} title={meta.title} right={meta.chromeRight}>
+            <div style={{ padding: 20 }}>
+              <div className="screen-header">
+                <div>
+                  <div className="screen-kicker" style={{ color: meta.accent }}>
+                    {meta.kicker}
+                  </div>
+                  <h1 className="screen-title">{meta.title}</h1>
+                </div>
+                <div className="screen-note">{meta.note}</div>
+              </div>
+              <ScreenComponent />
             </div>
-            <div className="screen-note">{meta.note}</div>
-          </div>
-          <ScreenComponent />
+          </WindowChrome>
         </main>
       </div>
     </div>

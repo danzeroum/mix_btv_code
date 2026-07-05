@@ -73,8 +73,6 @@ export function Permissao() {
           </div>
 
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <Button onClick={() => void handleDecision('deny')}>[n] Negar</Button>
-            <Button onClick={() => void handleDecision('always')}>[a] Sempre p/ {PENDING_PERMISSION.tool}</Button>
             <Button
               variant="primary"
               style={{ background: 'var(--ok)', color: '#08170c' }}
@@ -82,6 +80,8 @@ export function Permissao() {
             >
               [s] Permitir
             </Button>
+            <Button onClick={() => void handleDecision('deny')}>[n] Negar</Button>
+            <Button onClick={() => void handleDecision('always')}>[a] Sempre p/ {PENDING_PERMISSION.tool}</Button>
           </div>
         </div>
       </Modal>

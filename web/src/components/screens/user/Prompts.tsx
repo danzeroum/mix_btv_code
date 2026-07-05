@@ -42,8 +42,23 @@ export function Prompts() {
   }
 
   async function handleFav(id: string) {
-    const updated = await toggleFavorite(id)
-    setLibrary((prev) => prev.map((p) => (p.id === id ? updated : p)))
+    try {
+      const updated = await toggleFavorite(id)
+      setLibrary((prev) => prev.map((p) => (p.id === id ? updated : p)))
+    } catch {
+      toast.push('error', 'falha ao favoritar prompt')
+    }
+  }
+
+  /** O aside opera sobre o gerador ativo, não sobre um id de biblioteca — resolve
+   * para a entrada salva correspondente (se houver) antes de chamar toggleFavorite. */
+  function handleFavActiveGenerator() {
+    const saved = library.find((p) => p.generator === activeGenerator)
+    if (!saved) {
+      toast.push('error', 'salve o prompt na biblioteca antes de favoritar')
+      return
+    }
+    void handleFav(saved.id)
   }
 
   async function handleRemove(id: string) {
@@ -133,7 +148,7 @@ export function Prompts() {
           <button onClick={handleSave} style={chip}>
             save
           </button>
-          <button onClick={() => activeGenerator && void handleFav(activeGenerator)} style={chip}>
+          <button onClick={handleFavActiveGenerator} style={chip}>
             fav ★
           </button>
           <button

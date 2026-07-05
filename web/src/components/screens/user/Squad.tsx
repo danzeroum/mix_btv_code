@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { Card } from '../../primitives/Card'
 import { Button } from '../../primitives/Button'
 import { ProgressBar } from '../../primitives/ProgressBar'
+import { useAsyncAction } from '../../../hooks/useAsyncAction'
 import { useToast } from '../../primitives/Toast'
-import { CONSENSUS, SQUAD_AGENTS, resolveHITL } from '../../../api/squad'
+import { CONSENSUS, SQUAD_AGENTS, resolveHITL, runSquad } from '../../../api/squad'
 import type { SquadAgentState } from '../../../types/domain'
 
 const STATE_COLOR: Record<SquadAgentState, string> = {
@@ -16,6 +17,20 @@ const STATE_COLOR: Record<SquadAgentState, string> = {
 export function Squad() {
   const toast = useToast()
   const [gateResolved, setGateResolved] = useState(false)
+  const [task, setTask] = useState('migre o módulo de pagamentos para o novo gateway')
+  const [agents, setAgents] = useState(SQUAD_AGENTS)
+  const run = useAsyncAction(runSquad)
+
+  async function handleRunSquad() {
+    if (!task.trim()) return
+    try {
+      const result = await run.run(task)
+      setAgents(result)
+      toast.push('success', 'squad executado — agentes atualizados')
+    } catch {
+      toast.push('error', 'falha ao executar o squad')
+    }
+  }
 
   async function handleGate(approve: boolean) {
     try {
@@ -29,13 +44,22 @@ export function Squad() {
 
   return (
     <div className="stack">
-      <div className="mono" style={{ color: 'var(--muted)' }}>
-        &gt; forge squad "migre o módulo de pagamentos…"
+      <div className="row mono" style={{ color: 'var(--muted)' }}>
+        <span>&gt; forge squad</span>
+        <input
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && void handleRunSquad()}
+          style={{ flex: 1, background: 'transparent', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--ink)', padding: '4px 8px' }}
+        />
+        <Button onClick={() => void handleRunSquad()} disabled={run.state.status === 'loading'}>
+          {run.state.status === 'loading' ? 'executando…' : 'rodar'}
+        </Button>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: '1.4fr 1fr' }}>
         <div className="stack">
-          {SQUAD_AGENTS.map((a) => (
+          {agents.map((a) => (
             <Card key={a.id}>
               <div className="row" style={{ justifyContent: 'space-between' }}>
                 <span className="row">
@@ -44,7 +68,7 @@ export function Squad() {
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>{a.state}</span>
                 </span>
                 <span className="mono" style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  conf {a.confidence.toFixed(2)}
+                  conf {a.confidence == null ? '—' : a.confidence.toFixed(2)}
                 </span>
               </div>
               <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>{a.task}</p>

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useAppDispatch } from '../../../state/AppContext'
+import { useAppDispatch, useAppState } from '../../../state/AppContext'
 import { useAsyncAction } from '../../../hooks/useAsyncAction'
 import { useToast } from '../../primitives/Toast'
+import { primaryModelName } from '../../../api/models'
 import {
   INITIAL_TRANSCRIPT,
   SESSION_HEADER,
@@ -60,6 +61,7 @@ function TurnView({ turn }: { turn: TranscriptTurn }) {
 export function Sessao() {
   const dispatch = useAppDispatch()
   const toast = useToast()
+  const { modelTier, agentProfile } = useAppState()
   const [transcript, setTranscript] = useState(INITIAL_TRANSCRIPT)
   const [input, setInput] = useState('')
   const [policies, setPolicies] = useState(TOOL_POLICIES)
@@ -90,7 +92,7 @@ export function Sessao() {
     <div style={{ display: 'flex', gap: 16, height: 'calc(100% - 50px)' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div className="mono" style={{ fontSize: 11.5, color: 'var(--faint)', marginBottom: 8 }}>
-          {SESSION_HEADER.model} · agente {SESSION_HEADER.agent} · {SESSION_HEADER.provider} · cache{' '}
+          {primaryModelName(modelTier)} · agente {agentProfile} · {SESSION_HEADER.provider} · cache{' '}
           {SESSION_HEADER.cacheOn ? 'on' : 'off'} · sessão {SESSION_HEADER.sessionId}
         </div>
 
@@ -142,23 +144,28 @@ export function Sessao() {
         <div>
           <div style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 6 }}>FERRAMENTAS</div>
           {policies.map((p) => (
-            <button
-              key={p.tool}
-              onClick={() => void handleTogglePolicy(p.tool)}
-              className="row"
-              style={{
-                width: '100%',
-                justifyContent: 'space-between',
-                background: 'transparent',
-                border: 'none',
-                padding: '4px 0',
-                color: 'var(--ink)',
-                fontSize: 12,
-              }}
-            >
-              <span>{p.tool}</span>
-              <span style={{ color: p.policy === 'allow' ? 'var(--ok)' : 'var(--amber)' }}>{p.policy}</span>
-            </button>
+            <div key={p.tool} className="row" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+              <button
+                onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'skills' })}
+                title="abrir política em Skills & Permissões"
+                style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--ink)', fontSize: 12 }}
+              >
+                {p.tool}
+              </button>
+              <button
+                onClick={() => void handleTogglePolicy(p.tool)}
+                title="alternar allow/ask"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  fontSize: 12,
+                  color: p.policy === 'allow' ? 'var(--ok)' : 'var(--amber)',
+                }}
+              >
+                {p.policy}
+              </button>
+            </div>
           ))}
         </div>
 

@@ -49,7 +49,8 @@ export interface SquadAgent {
   id: string
   name: string
   state: SquadAgentState
-  confidence: number
+  /** null quando o agente está ocioso e ainda não votou nesta rodada. */
+  confidence: number | null
   task: string
 }
 
@@ -87,11 +88,13 @@ export interface VerifyStep {
   name: string
   detail: string
   ok: boolean
+  evidence: Record<string, unknown>
 }
 
 export interface ReviewerScore {
   name: string
   score: number
+  detail: string
 }
 
 export interface ProviderInfo {

@@ -15,9 +15,9 @@ export const HITL_ESCALATION_THRESHOLD = 0.7
 export const SQUAD_AGENTS: SquadAgent[] = [
   { id: 'architect', name: 'Architect', state: 'concluido', confidence: 0.88, task: 'Definiu contrato da nova API e plano de migração incremental.' },
   { id: 'developer', name: 'Developer', state: 'executando', confidence: 0.95, task: 'Migrando payments/client.py e adaptando chamadas.' },
-  { id: 'auditor', name: 'Auditor', state: 'aguardando', confidence: 0.81, task: 'Aguardando diff do Developer para revisão de segurança.' },
-  { id: 'designer', name: 'Designer', state: 'ocioso', confidence: 0.5, task: 'Sem tarefa atribuída nesta rodada.' },
-  { id: 'ops', name: 'Ops', state: 'aguardando', confidence: 0.7, task: 'Aguardando aprovação do gate HITL para deploy.' },
+  { id: 'auditor', name: 'Auditor', state: 'aguardando', confidence: 0.85, task: 'Aguardando diff do Developer para revisão de segurança.' },
+  { id: 'designer', name: 'Designer', state: 'ocioso', confidence: null, task: 'Sem tarefa atribuída nesta rodada.' },
+  { id: 'ops', name: 'Ops', state: 'aguardando', confidence: 0.9, task: 'Aguardando aprovação do gate HITL para deploy.' },
 ]
 
 export const CONSENSUS: ConsensusResult = {
