@@ -7,7 +7,11 @@
 //! LLM a partir daqui — este serviço só cobre a camada de prompts.
 
 pub mod client;
+pub mod core_server;
+pub mod squad_client;
 pub mod supervisor;
 
 pub use client::{SidecarClient, SidecarError};
+pub use core_server::{serve_core, CoreBackend, CoreServer};
+pub use squad_client::{SquadClient, SquadSupervisor};
 pub use supervisor::SidecarSupervisor;

@@ -613,3 +613,48 @@ precisam; o núcleo segue só pydantic). Próximo: 4d (lado Rust —
 `CoreService` server sobre o `Gateway`, `SquadService` client,
 `forge squad`, fallback de 3 níveis, teste cross-process real Rust↔Python
 e os critérios de aceite da Fase 4).
+
+## Fase 4 — Onda 4d (parte 1): laço bidirecional Rust↔Python real, e2e cross-process (2026-07-05)
+
+O lado Rust do laço fechou, provado por um teste **cross-process real**
+(`squad_e2e.rs`, nos moldes do `python_sidecar.rs`): o Rust sobe o
+`CoreService`, spawna o `forge_squad.server` Python de verdade
+(`uv run`), chama `ExecuteTask` e coleta o stream de `SquadEvent`. A
+execução mostra as 3 propostas com conteúdo real vindo dos callbacks
+`Generate`, o consenso com `strength 0.786` e `requires_human=false`
+preservado através de todo o caminho (pydantic→proto→wire→Rust), handoffs
+start/complete e o step — o critério de aceite `handoff.*` da Fase 4
+exercitado de ponta a ponta.
+
+Peças (crate `forge-sidecar`): `core_server.rs` (`CoreService` server com
+um `CoreBackend` injetável — `Gateway` real em produção, roteirizado em
+teste; `Generate` faz a ponte com o gerador, `RunTool`/`AppendLedger`/
+`Recall`/`Remember` devolvem `Unimplemented` honestamente porque o
+orquestrador atual não os chama), `squad_client.rs` (`SquadClient` +
+`SquadSupervisor` que spawna o Python com os dois sockets). Isolei o
+server com um round-trip Rust↔Rust em processo (`core_server_inprocess.rs`)
+antes de culpar a interop — passou, o que provou que o problema seguinte
+era de interop, não da implementação.
+
+Dois achados reais de interop, ambos corrigidos:
+
+1. **`grpc.default_authority`**: o grpc-python, sobre UDS, deriva um
+   `:authority` do path do socket que o servidor tonic (h2) rejeita como
+   `PROTOCOL_ERROR` → `RST_STREAM` na primeira chamada `Generate`. Fixar
+   `("grpc.default_authority", "localhost")` no canal Python resolve —
+   essa é a primeira vez que um cliente Python fala com um servidor Rust
+   (as direções anteriores eram todas Rust-cliente → Python-servidor).
+   Isolado metodicamente: o round-trip Rust↔Rust passava, então o culpado
+   era o cliente Python.
+2. **stderr do filho na falha**: o `SquadSupervisor` (como o
+   `SidecarSupervisor`, cujo comentário prometia isso mas não entregava)
+   agora lê o stderr do processo Python quando ele morre antes de ficar
+   pronto e inclui no erro — sem isso, o diagnóstico do RST_STREAM teria
+   sido às cegas.
+
+`forge-sidecar` ganhou `tokio-stream` como dep regular (server precisa de
+`UnixListenerStream`/`ReceiverStream`). 5 testes do crate verdes (o
+`python_sidecar.rs` da Fase 3 segue passando — sem regressão). Restante da
+Onda 4d: `forge squad` no CLI (CoreService sobre o `Gateway` real +
+resolver de permissão na TUI) e o fallback de 3 níveis (squad →
+agente-único → safe-mode).

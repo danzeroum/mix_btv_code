@@ -115,7 +115,13 @@ class SquadServicer(squad_pb2_grpc.SquadServiceServicer):
         async def sink(event: dict[str, Any]) -> None:
             await queue.put(event)
 
-        channel = grpc.aio.insecure_channel(f"unix://{self.core_socket}")
+        # `grpc.default_authority` explícito: sobre UDS, o grpc-python
+        # deriva um `:authority` do path do socket que o servidor tonic (h2)
+        # rejeita como PROTOCOL_ERROR (RST_STREAM). Fixar um authority
+        # válido resolve a interop Python-cliente → Rust-servidor.
+        channel = grpc.aio.insecure_channel(
+            f"unix://{self.core_socket}", options=[("grpc.default_authority", "localhost")]
+        )
         gateway = GrpcGatewayClient(channel)
         permission = GrpcPermissionClient(channel)
         memory = AgentMemorySystem(storage_dir=self.memory_dir) if self.memory_dir else AgentMemorySystem()
