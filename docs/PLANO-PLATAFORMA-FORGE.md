@@ -267,3 +267,12 @@ completo com evidência `verification-evidence.v1`, auditor consumindo
 evidência determinística real, skill-vetter, `forge_review` + quality
 gates + certificação, self-hosting (a plataforma passa no próprio
 `/verify`).
+
+**Pendência de exercício da Fase 4** (código pronto e testado por unit;
+falta só rodar com API real): o registro do consenso no ledger
+(`squad.consensus` em `.forge/forge.db`, via `forge-cli/src/squad.rs`)
+foi coberto por unit test do orquestrador e está wireado, mas o smoke de
+`forge squad` com key inválida falhou antes do consenso. Fechar na
+primeira rodada de `forge squad` com API key válida — confirmar que o
+evento `squad.consensus` aparece no ledger com `decision_maker`/`strength`/
+`requires_human` reais. Não é lacuna de código, é lacuna de exercício.
