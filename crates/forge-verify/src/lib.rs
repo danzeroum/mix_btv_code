@@ -5,19 +5,69 @@
 //! timeout e produz `verification-evidence.v1` — evidência estruturada que
 //! o Auditor do squad consome no lugar de opinião de LLM.
 //!
-//! Fase 1 (scaffold): execução sequencial de passos e montagem da
-//! evidência. Timeouts, SAST e o skill-vetter completam a Fase 5.
+//! Fase 5: timeouts com kill de grupo de processos (ver `exec`), findings
+//! estruturados por ferramenta (ver `parsers`) e o comando `forge verify`
+//! (crates/forge-cli) escrevendo a evidência em disco. O skill-vetter
+//! completa a fase em onda separada.
 
-use forge_schemas::verification::{VerificationEvidence, VerificationStep};
-use std::process::Command;
-use std::time::Instant;
+pub mod config;
+pub mod exec;
+pub mod parsers;
 
-/// Um passo declarado do pipeline (comando + args).
+use forge_schemas::verification::{Finding, VerificationEvidence, VerificationStep};
+use std::time::Duration;
+
+/// Qual parser aplicar à stdout do passo para extrair findings estruturados.
+/// `None` = sem parser — o passo ainda conta para o veredito via exit_code,
+/// só não produz findings individuais.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Parser {
+    CargoTest,
+    ClippyJson,
+    RuffJson,
+}
+
+impl Parser {
+    fn apply(self, stdout: &str) -> Vec<Finding> {
+        match self {
+            Parser::CargoTest => parsers::parse_cargo_test(stdout),
+            Parser::ClippyJson => parsers::parse_clippy_json(stdout),
+            Parser::RuffJson => parsers::parse_ruff_json(stdout),
+        }
+    }
+}
+
+/// Um passo declarado do pipeline (comando + args + timeout + parser opcional).
 #[derive(Debug, Clone)]
 pub struct StepSpec {
     pub name: String,
     pub program: String,
     pub args: Vec<String>,
+    /// `None` roda sem limite — aceitável em uso local, desaconselhado em CI.
+    pub timeout: Option<Duration>,
+    pub parser: Option<Parser>,
+}
+
+impl StepSpec {
+    pub fn new(name: impl Into<String>, program: impl Into<String>, args: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            program: program.into(),
+            args,
+            timeout: None,
+            parser: None,
+        }
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn with_parser(mut self, parser: Parser) -> Self {
+        self.parser = Some(parser);
+        self
+    }
 }
 
 /// Executa os passos em ordem e monta a evidência. Passos após uma falha
@@ -28,27 +78,7 @@ pub fn run_pipeline(
     produced_at: &str,
     steps: &[StepSpec],
 ) -> VerificationEvidence {
-    let executed: Vec<VerificationStep> = steps
-        .iter()
-        .map(|spec| {
-            let start = Instant::now();
-            let exit_code = Command::new(&spec.program)
-                .args(&spec.args)
-                .output()
-                .map(|out| out.status.code().unwrap_or(-1))
-                .unwrap_or(-1);
-            VerificationStep {
-                name: spec.name.clone(),
-                tool: format!("{} {}", spec.program, spec.args.join(" "))
-                    .trim()
-                    .to_string(),
-                exit_code,
-                duration_ms: start.elapsed().as_millis() as u64,
-                findings: vec![],
-            }
-        })
-        .collect();
-
+    let executed: Vec<VerificationStep> = steps.iter().map(run_step).collect();
     let verdict = VerificationEvidence::derive_verdict(&executed);
     VerificationEvidence {
         run_id: run_id.to_string(),
@@ -56,6 +86,61 @@ pub fn run_pipeline(
         steps: executed,
         verdict,
         produced_at: produced_at.to_string(),
+    }
+}
+
+/// Sentinela de exit code para passo que estourou o timeout — convenção do
+/// utilitário `timeout` do coreutils, distinta de qualquer exit code real.
+const TIMEOUT_EXIT_CODE: i32 = 124;
+
+fn run_step(spec: &StepSpec) -> VerificationStep {
+    let result = exec::run_with_timeout(&spec.program, &spec.args, spec.timeout);
+    let tool = format!("{} {}", spec.program, spec.args.join(" "))
+        .trim()
+        .to_string();
+
+    match result.output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut findings = spec.parser.map(|p| p.apply(&stdout)).unwrap_or_default();
+            let exit_code = if result.timed_out {
+                TIMEOUT_EXIT_CODE
+            } else {
+                output.status.code().unwrap_or(-1)
+            };
+            if result.timed_out {
+                findings.push(Finding {
+                    tool: spec.program.clone(),
+                    severity: "error".to_string(),
+                    message: format!(
+                        "passo '{}' excedeu o timeout e foi encerrado (grupo de processos morto)",
+                        spec.name
+                    ),
+                    file: None,
+                    line: None,
+                });
+            }
+            VerificationStep {
+                name: spec.name.clone(),
+                tool,
+                exit_code,
+                duration_ms: result.duration_ms,
+                findings,
+            }
+        }
+        Err(e) => VerificationStep {
+            name: spec.name.clone(),
+            tool,
+            exit_code: -1,
+            duration_ms: result.duration_ms,
+            findings: vec![Finding {
+                tool: spec.program.clone(),
+                severity: "error".to_string(),
+                message: format!("falha ao executar: {e}"),
+                file: None,
+                line: None,
+            }],
+        },
     }
 }
 
@@ -71,16 +156,8 @@ mod tests {
             "deadbeef",
             "2026-07-05T00:00:00Z",
             &[
-                StepSpec {
-                    name: "ok".into(),
-                    program: "true".into(),
-                    args: vec![],
-                },
-                StepSpec {
-                    name: "falha".into(),
-                    program: "false".into(),
-                    args: vec![],
-                },
+                StepSpec::new("ok", "true", vec![]),
+                StepSpec::new("falha", "false", vec![]),
             ],
         );
         assert!(matches!(evidence.verdict, Verdict::Fail));
@@ -95,5 +172,56 @@ mod tests {
         let json = serde_json::to_value(&evidence).unwrap();
         assert_eq!(json["run_id"], "run-2");
         assert_eq!(json["verdict"], "pass");
+    }
+
+    #[test]
+    fn passo_com_timeout_estourado_falha_com_finding_e_exit_code_sentinela() {
+        let evidence = run_pipeline(
+            "run-3",
+            "sha",
+            "ts",
+            &[StepSpec::new("dorme", "sleep", vec!["5".to_string()])
+                .with_timeout(Duration::from_millis(150))],
+        );
+        assert!(matches!(evidence.verdict, Verdict::Fail));
+        assert_eq!(evidence.steps[0].exit_code, TIMEOUT_EXIT_CODE);
+        assert_eq!(evidence.steps[0].findings.len(), 1);
+        assert!(evidence.steps[0].findings[0].message.contains("timeout"));
+    }
+
+    #[test]
+    fn passo_com_parser_preenche_findings_reais() {
+        let evidence = run_pipeline(
+            "run-4",
+            "sha",
+            "ts",
+            &[StepSpec::new("echo-clippy", "printf", vec![
+                "%s\\n".to_string(),
+                r#"{"reason":"compiler-message","message":{"level":"warning","message":"unused variable: `x`","spans":[{"file_name":"src/main.rs","is_primary":true,"line_start":2}]}}"#.to_string(),
+            ])
+            .with_parser(Parser::ClippyJson)],
+        );
+        assert_eq!(evidence.steps[0].findings.len(), 1);
+        assert_eq!(
+            evidence.steps[0].findings[0].file.as_deref(),
+            Some("src/main.rs")
+        );
+    }
+
+    #[test]
+    fn programa_inexistente_falha_sem_panicar() {
+        let evidence = run_pipeline(
+            "run-5",
+            "sha",
+            "ts",
+            &[StepSpec::new(
+                "inexistente",
+                "este-programa-nao-existe-xyz",
+                vec![],
+            )],
+        );
+        assert!(matches!(evidence.verdict, Verdict::Fail));
+        assert_eq!(evidence.steps[0].exit_code, -1);
+        assert_eq!(evidence.steps[0].findings.len(), 1);
     }
 }
