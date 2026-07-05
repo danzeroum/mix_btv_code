@@ -1,35 +1,61 @@
 //! API local + dashboard de métricas (origem: prompte) — Fase 3.
 //!
 //! Serve a telemetria offline-first gravada por `forge-store::Telemetry`
-//! (`.forge/telemetry.db`) numa página HTML autocontida e duas rotas JSON.
-//! Nada sai da máquina do usuário — o servidor escuta só em `127.0.0.1`.
+//! (`.forge/telemetry.db`) para a SPA em `web/dist` (React/TS, ver `web/`)
+//! e duas rotas JSON. Nada sai da máquina do usuário — o servidor escuta
+//! só em `127.0.0.1`.
 
 use axum::extract::{Query, State};
-use axum::response::{Html, IntoResponse, Json};
+use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use axum::Router;
 use forge_store::Telemetry;
 use serde::Deserialize;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Clone)]
 struct AppState {
     telemetry: Telemetry,
 }
 
-/// Monta o router do dashboard sobre um handle de telemetria já aberto.
-pub fn router(telemetry: Telemetry) -> Router {
+/// Monta o router do dashboard sobre um handle de telemetria já aberto,
+/// servindo os assets estáticos da SPA a partir de `web_dir` (build de
+/// `web/`, tipicamente `web/dist`). Path relativo é resolvido contra o
+/// diretório de trabalho do processo — ver `forge-cli`'s `run_dashboard`
+/// para a resolução por `FORGE_WEB_DIR`/padrão.
+pub fn router(telemetry: Telemetry, web_dir: impl AsRef<Path>) -> Router {
+    let web_dir = web_dir.as_ref();
+    let index_html = web_dir.join("index.html");
+    // `fallback` (não `not_found_service`) preserva o status 200 de `index.html`
+    // para rotas client-side desconhecidas do servidor (padrão SPA).
+    let serve_dir = ServeDir::new(web_dir).fallback(ServeFile::new(index_html));
+
     Router::new()
-        .route("/", get(index))
         .route("/api/summary", get(summary))
         .route("/api/events", get(events))
+        .fallback_service(serve_dir)
         .with_state(AppState { telemetry })
 }
 
 /// Sobe o dashboard em `addr` (bloqueia até o processo ser encerrado).
-pub async fn serve(telemetry: Telemetry, addr: SocketAddr) -> std::io::Result<()> {
+pub async fn serve(
+    telemetry: Telemetry,
+    addr: SocketAddr,
+    web_dir: impl AsRef<Path>,
+) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router(telemetry)).await
+    axum::serve(listener, router(telemetry, web_dir)).await
+}
+
+/// Resolve o diretório da SPA por precedência: `FORGE_WEB_DIR` → `web/dist`
+/// (assumindo execução a partir da raiz do repo). Evita hardcodar a
+/// suposição de CWD dentro do router em si.
+pub fn default_web_dir() -> PathBuf {
+    std::env::var_os("FORGE_WEB_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("web/dist"))
 }
 
 async fn summary(State(state): State<AppState>) -> impl IntoResponse {
@@ -44,58 +70,6 @@ struct EventsQuery {
 async fn events(State(state): State<AppState>, Query(q): Query<EventsQuery>) -> impl IntoResponse {
     Json(state.telemetry.recent(q.limit.unwrap_or(50)))
 }
-
-async fn index() -> impl IntoResponse {
-    Html(INDEX_HTML)
-}
-
-const INDEX_HTML: &str = r#"<!doctype html>
-<html lang="pt-br">
-<head>
-<meta charset="utf-8">
-<title>forge — dashboard</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 2rem; background: #0f1115; color: #e6e6e6; }
-  h1 { font-size: 1.25rem; }
-  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #2a2d34; font-size: 0.9rem; }
-  .cards { display: flex; gap: 1rem; flex-wrap: wrap; }
-  .card { background: #1a1d24; border-radius: 8px; padding: 1rem 1.5rem; min-width: 10rem; }
-  .card b { display: block; font-size: 1.5rem; }
-  code { color: #9ecbff; }
-</style>
-</head>
-<body>
-<h1>forge — dashboard de telemetria</h1>
-<div class="cards" id="cards"></div>
-<h2>eventos recentes</h2>
-<table>
-  <thead><tr><th>ts</th><th>nome</th><th>sessão</th><th>props</th></tr></thead>
-  <tbody id="events"></tbody>
-</table>
-<script>
-async function refresh() {
-  const [summary, events] = await Promise.all([
-    fetch('/api/summary').then(r => r.json()),
-    fetch('/api/events?limit=50').then(r => r.json()),
-  ]);
-  const rate = summary.cache_hit_rate == null ? "n/a" : (summary.cache_hit_rate * 100).toFixed(1) + "%";
-  document.getElementById('cards').innerHTML = `
-    <div class="card"><b>${summary.total_events}</b>eventos totais</div>
-    <div class="card"><b>${rate}</b>cache hit rate</div>
-    <div class="card"><b>${summary.by_name['llm.call'] || 0}</b>chamadas llm</div>
-    <div class="card"><b>${summary.by_name['tool.result'] || 0}</b>execuções de ferramenta</div>
-  `;
-  document.getElementById('events').innerHTML = events.map(e => `
-    <tr><td><code>${e.ts}</code></td><td>${e.name}</td><td>${e.session_id}</td><td><code>${JSON.stringify(e.props)}</code></td></tr>
-  `).join('');
-}
-refresh();
-setInterval(refresh, 5000);
-</script>
-</body>
-</html>
-"#;
 
 #[cfg(test)]
 mod tests {
@@ -115,9 +89,22 @@ mod tests {
         telemetry
     }
 
+    /// Fixture mínima de `web/dist`: um `index.html` só para os testes não
+    /// dependerem do build real da SPA nem do diretório de trabalho do CI.
+    fn fixture_web_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<html><body>forge</body></html>",
+        )
+        .unwrap();
+        dir
+    }
+
     #[tokio::test]
     async fn summary_devolve_json_com_total_events() {
-        let app = router(telemetry_com_um_evento());
+        let web_dir = fixture_web_dir();
+        let app = router(telemetry_com_um_evento(), web_dir.path());
         let resp = app
             .oneshot(
                 Request::builder()
@@ -139,7 +126,8 @@ mod tests {
     async fn events_respeita_o_limite() {
         let telemetry = telemetry_com_um_evento();
         telemetry.record("cache.hit", "s1", serde_json::json!({}), "t2");
-        let app = router(telemetry);
+        let web_dir = fixture_web_dir();
+        let app = router(telemetry, web_dir.path());
         let resp = app
             .oneshot(
                 Request::builder()
@@ -159,9 +147,26 @@ mod tests {
 
     #[tokio::test]
     async fn index_devolve_html() {
-        let app = router(Telemetry::open_in_memory().unwrap());
+        let web_dir = fixture_web_dir();
+        let app = router(Telemetry::open_in_memory().unwrap(), web_dir.path());
         let resp = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rota_desconhecida_cai_no_index_html_spa_fallback() {
+        let web_dir = fixture_web_dir();
+        let app = router(Telemetry::open_in_memory().unwrap(), web_dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/designer")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);

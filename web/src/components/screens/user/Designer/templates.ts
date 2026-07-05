@@ -1,0 +1,82 @@
+import type { DesignerNode } from '../../../../types/domain'
+
+export const BOARD_WIDTH = 720
+export const BOARD_HEIGHT = 470
+export const CARD_W = 104
+export const CARD_H = 62
+export const PILL_W = 60
+export const PILL_H = 30
+
+type Template = Omit<DesignerNode, 'id' | 'x' | 'y'>
+
+/** Pesos fiéis a consensus.py::DEFAULT_AGENT_WEIGHTS e a hitl.py — não inventar números novos. */
+export const TEMPLATES: Record<string, Template> = {
+  Architect: {
+    kind: 'card', name: 'Architect', role: 'arquitetura', color: 'var(--py)', icon: '◈', sub: 'agente · forge_squad.agents',
+    params: [{ k: 'peso architecture', v: '0.90' }, { k: 'peso security', v: '0.70' }, { k: 'ferramentas', v: 'read · grep' }],
+    removable: true,
+  },
+  Developer: {
+    kind: 'card', name: 'Developer', role: 'implementação', color: 'var(--amber)', icon: '⚒', sub: 'agente · forge_squad.agents',
+    params: [
+      { k: 'peso architecture', v: '0.60' },
+      { k: 'peso implementation', v: '0.95' },
+      { k: 'peso testing', v: '0.80' },
+      { k: 'ferramentas', v: 'read · grep · edit · bash' },
+    ],
+    removable: true,
+  },
+  Auditor: {
+    kind: 'card', name: 'Auditor', role: 'auditoria', color: 'var(--teal)', icon: '⚿', sub: 'agente · forge_squad.agents',
+    params: [{ k: 'peso security', v: '0.95' }, { k: 'peso quality', v: '0.85' }, { k: 'ferramentas', v: 'read · grep' }],
+    removable: true,
+  },
+  Designer: {
+    kind: 'card', name: 'Designer', role: 'ui/ux', color: 'var(--wire)', icon: '✎', sub: 'agente · forge_squad.agents',
+    params: [{ k: 'peso ui', v: '0.95' }, { k: 'peso ux', v: '0.90' }],
+    removable: true,
+  },
+  Ops: {
+    kind: 'card', name: 'Ops', role: 'operações', color: 'var(--ok)', icon: '⛓', sub: 'agente · forge_squad.agents',
+    params: [{ k: 'peso infrastructure', v: '0.90' }, { k: 'peso deployment', v: '0.90' }],
+    removable: true,
+  },
+  Consenso: {
+    kind: 'card', name: 'Consenso', role: 'consensus', color: 'var(--rust)', icon: '⬡', sub: 'WeightedConsensusEngine',
+    params: [{ k: 'limiar HITL', v: '0.70' }, { k: 'algoritmo', v: 'voto ponderado por peso × confiança' }],
+    removable: true,
+  },
+  'Gate HITL': {
+    kind: 'card', name: 'Gate HITL', role: 'hitl', color: 'var(--amber)', icon: '⚑', sub: 'ProgressiveAutonomyManager',
+    params: [
+      { k: 'níveis', v: '0 full_human_control … 3 full_autonomy' },
+      { k: 'trust +/-', v: '+0.02 sucesso · -0.10 falha' },
+    ],
+    removable: true,
+  },
+}
+
+export const TEMPLATE_KEYS = Object.keys(TEMPLATES)
+
+export function initialNodes(): DesignerNode[] {
+  return [
+    { id: 'task', x: 20, y: 205, kind: 'pill', name: 'task', role: 'entry', color: 'var(--ink)', icon: '▸', sub: 'entrada', params: [], removable: false },
+    { id: 'architect', x: 150, y: 90, ...TEMPLATES.Architect },
+    { id: 'developer', x: 150, y: 220, ...TEMPLATES.Developer },
+    { id: 'auditor', x: 150, y: 350, ...TEMPLATES.Auditor },
+    { id: 'consenso', x: 330, y: 220, ...TEMPLATES.Consenso },
+    { id: 'hitl', x: 500, y: 220, ...TEMPLATES['Gate HITL'] },
+  ]
+}
+
+export function initialEdges() {
+  return [
+    { from: 'task', to: 'architect' },
+    { from: 'task', to: 'developer' },
+    { from: 'task', to: 'auditor' },
+    { from: 'architect', to: 'consenso' },
+    { from: 'developer', to: 'consenso', label: 'paralelo' },
+    { from: 'auditor', to: 'consenso' },
+    { from: 'consenso', to: 'hitl', label: '< 0.7' },
+  ]
+}
