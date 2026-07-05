@@ -14,6 +14,8 @@ pub enum GatewayError {
     NoProvider,
     #[error("todos os providers falharam: {0}")]
     AllFailed(String),
+    #[error("limite de requisições excedido: {0}")]
+    RateLimited(String),
 }
 
 /// Contrato de geração consumido pelo loop de agente (forge-core). O loop é

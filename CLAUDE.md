@@ -40,9 +40,8 @@ just test | just lint | just verify    # atalhos (requer just)
 ## Roadmap e estado
 
 Plano completo em `docs/PLANO-PLATAFORMA-FORGE.md` (6 fases). Estado atual:
-**Fase 2 concluída** (sessões duráveis, epochs+compaction, TUI, Managed
-Tool Output Files — ver histórico). **Fase 3 em andamento**: primeira
-ativação real do gRPC (ADR 0003). Contrato em
+**Fase 3 concluída** (ver histórico completo em `docs/DECISOES.md`).
+Ativação real do gRPC (ADR 0003): contrato em
 `schemas/proto/promptforge.proto`; `forge-proto/build.rs` compila via
 tonic-build com protoc vendorizado (`protoc-bin-vendored`, sem exigir
 protoc de sistema); `scripts/gen_proto_py.py` gera os stubs Python
@@ -56,8 +55,15 @@ estiver disponível. Servidor real em
 Testes em duas camadas: mock Rust (`client_over_uds.rs`, sempre roda) e
 processo Python real (`python_sidecar.rs`, pula graciosamente sem
 `uv`/workspace — o CI instala `uv` para exercitar o caminho real).
-Restante da Fase 3: rate limiting por tier, biblioteca de prompts,
-telemetria + dashboard (`forge-server`).
+
+Fechamento da Fase 3: `forge-llm::RateLimiter` (sliding window tier-gated,
+decorator `RateLimitedGenerator` em `forge-cli/src/rate_limit_gen.rs`,
+composto por baixo do `CachedGenerator` — hit de cache nunca consome vaga);
+`forge-store::{Telemetry, PromptLibrary}` (offline-first, SQLite local,
+falhas nunca derrubam o caminho principal); `/prompt
+save|library|use|fav|rm` no chat (biblioteca de prompts); `forge-server`
+(axum) + comando `forge dashboard` servindo `.forge/telemetry.db` num
+painel local em `127.0.0.1`. Próximo marco: Fase 4 (squad multi-agente).
 
 ## Convenções
 

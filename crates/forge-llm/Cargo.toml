@@ -3,7 +3,7 @@ name = "forge-llm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Gateway LLM da plataforma Forge: providers, streaming, ModelTier, cache por hash, fallback"
+description = "Gateway LLM da plataforma Forge: providers, streaming, ModelTier, cache por hash, fallback, rate limiting"
 
 [dependencies]
 forge-schemas.workspace = true
@@ -13,3 +13,7 @@ regex.workspace = true
 thiserror.workspace = true
 reqwest.workspace = true
 futures-util.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }

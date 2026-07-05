@@ -227,5 +227,41 @@ localmente com o processo Python de verdade respondendo por gRPC.
 Total: 84 testes Rust + 19 Python verdes; clippy `-D warnings` e rustfmt
 limpos.
 
-Restante da Fase 3: rate limiting por tier no gateway, biblioteca de
-prompts + histórico, telemetria + dashboard (`forge-server`).
+## Fase 3 concluída: rate limiting, telemetria, biblioteca de prompts e dashboard (2026-07-05)
+
+- **Rate limiting tier-gated** (`forge-llm::rate_limit`): sliding window em
+  memória (`VecDeque<Instant>` atrás de um `Mutex`), limites default mais
+  conservadores para modelos caros (`ModelTier::Small` 60/10min,
+  `Medium` 30/10min, `Large` 15/10min), `acquire()` async espera até a
+  janela liberar ou devolve `RateLimitError` se a espera excede
+  `max_wait`. Testado com `#[tokio::test(start_paused = true)]` para
+  determinismo sem `sleep` real. Decorator `RateLimitedGenerator`
+  (`forge-cli/src/rate_limit_gen.rs`) fica por baixo do
+  `CachedGenerator` na cadeia — um hit de cache nunca consome uma vaga
+  do limitador. `GatewayError` ganhou a variante `RateLimited(String)`.
+- **Telemetria offline-first** (`forge-store::telemetry`, origem: prompte):
+  `TelemetryStore` grava eventos (`name`, `session_id`, `props`, `ts`) em
+  SQLite; `TelemetrySummary` agrega por nome e calcula
+  `cache_hit_rate = hits/(hits+misses)`. Handle `Telemetry` clonável
+  (`Arc<Mutex<TelemetryStore>>`) cujo `record()` nunca propaga erro —
+  só avisa no stderr. `CachedGenerator` e `RateLimitedGenerator` gravam
+  `cache.hit`/`cache.miss`/`llm.call`. Nada sai da máquina do usuário.
+- **Biblioteca de prompts** (`forge-store::prompt_library`, origem:
+  prompte `library.js`/`savedPrompts.js`): `PromptLibrary` sobre SQLite
+  com `save`/`list(tag)`/`get`/`toggle_favorite`/`delete`, todos
+  idempotentes/seguros para ids inexistentes. Ligada ao chat via
+  `/prompt save <nome> [tags=a,b] <gerador> chave=valor...` (renderiza
+  pelo sidecar e grava), `/prompt library [tag]`, `/prompt use <id>`,
+  `/prompt fav <id>`, `/prompt rm <id>` — funcionam mesmo sem sidecar
+  (só `save` e o render bruto exigem o gerador Python ativo).
+- **Dashboard de métricas** (`forge-server`, origem: prompte): API axum
+  local (`GET /`, `GET /api/summary`, `GET /api/events?limit=N`) servindo
+  uma página HTML autocontida (fetch + auto-refresh a cada 5s) sobre o
+  mesmo `Telemetry` handle. Comando `forge dashboard [--port]` abre
+  `.forge/telemetry.db` e sobe o servidor em `127.0.0.1` (nunca expõe a
+  rede). Testado com `axum::Router::oneshot` (sem bind de socket real)
+  e smoke-testado de ponta a ponta com o binário real via `curl`.
+
+Total: 101 testes Rust + 19 Python verdes; clippy `-D warnings` e rustfmt
+limpos. Fase 3 do roadmap está completa. Próximo marco: Fase 4 (squad
+multi-agente via sidecar Python, consenso ponderado do BuildToValue).

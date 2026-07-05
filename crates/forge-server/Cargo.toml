@@ -6,3 +6,11 @@ license.workspace = true
 description = "API local e dashboard de métricas da plataforma Forge (axum) — Fase 3"
 
 [dependencies]
+forge-store.workspace = true
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }

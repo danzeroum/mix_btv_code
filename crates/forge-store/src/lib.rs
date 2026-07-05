@@ -1,13 +1,17 @@
 //! Storage durável da plataforma Forge (SQLite via rusqlite).
 //!
-//! Fase 1: ledger append-only com hash-chain verificável e cache de
-//! prompts por hash. Sessões duráveis, biblioteca de prompts e buffer de
-//! telemetria ganham tabelas próprias nas Fases 2–3.
+//! Fase 1–3: ledger append-only com hash-chain verificável, cache de
+//! prompts por hash, event store para sessões duráveis, telemetria
+//! offline-first e biblioteca de prompts.
 
 pub mod events;
 pub mod ledger;
 pub mod prompt_cache;
+pub mod prompt_library;
+pub mod telemetry;
 
 pub use events::{EventError, EventInput, EventStore, StoredEvent};
 pub use ledger::LedgerStore;
 pub use prompt_cache::PromptCache;
+pub use prompt_library::{PromptLibrary, SavedPrompt};
+pub use telemetry::{Telemetry, TelemetryRecord, TelemetryStore, TelemetrySummary};

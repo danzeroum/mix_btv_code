@@ -6,22 +6,25 @@
 //! `forge_schemas::request_hash`, o mesmo contrato com paridade
 //! Rust×Python garantida pelas fixtures.
 
+use crate::session::now_rfc3339;
 use forge_llm::chat::{AssistantTurn, GenerateRequest};
 use forge_llm::gateway::{GatewayError, Generator};
-use forge_store::PromptCache;
+use forge_store::{PromptCache, Telemetry};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
 pub struct CachedGenerator<G: Generator> {
     inner: G,
     cache: Mutex<PromptCache>,
+    telemetry: Option<Telemetry>,
 }
 
 impl<G: Generator> CachedGenerator<G> {
-    pub fn new(inner: G, cache: PromptCache) -> Self {
+    pub fn new(inner: G, cache: PromptCache, telemetry: Option<Telemetry>) -> Self {
         Self {
             inner,
             cache: Mutex::new(cache),
+            telemetry,
         }
     }
 
@@ -55,15 +58,29 @@ impl<G: Generator + Sync> Generator for CachedGenerator<G> {
                     on_delta(&text);
                 }
                 turn.provider = format!("{}+cache", turn.provider);
+                if let Some(t) = &self.telemetry {
+                    t.record(
+                        "cache.hit",
+                        "cli",
+                        json!({"model": req.model}),
+                        &now_rfc3339(),
+                    );
+                }
                 return Ok(turn);
             }
         }
 
+        if let Some(t) = &self.telemetry {
+            t.record(
+                "cache.miss",
+                "cli",
+                json!({"model": req.model}),
+                &now_rfc3339(),
+            );
+        }
         let turn = self.inner.generate(req, on_delta).await?;
         if let Ok(serialized) = serde_json::to_string(&turn) {
-            let ts = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default();
+            let ts = now_rfc3339();
             let _ = self.cache.lock().unwrap().put(&key, &serialized, &ts);
         }
         Ok(turn)
@@ -118,6 +135,7 @@ mod tests {
                 calls: AtomicUsize::new(0),
             },
             PromptCache::open_in_memory().unwrap(),
+            None,
         );
 
         let mut deltas = String::new();

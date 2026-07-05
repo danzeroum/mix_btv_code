@@ -6,6 +6,7 @@
 //! `squad` ativa o sidecar Python na Fase 4; `verify` completa na Fase 5.
 
 mod cache;
+mod rate_limit_gen;
 mod session;
 mod sidecar;
 mod tui_app;
@@ -17,11 +18,16 @@ use forge_core::{
     AgentLoop, CompactionPolicy, DurableSession, LoopEvent, PermissionResolver, BUILD, PLAN,
 };
 use forge_llm::chat::ChatMessage;
-use forge_llm::{tier_from_id, Gateway, Generator, ModelTier};
-use forge_store::{EventStore, PromptCache};
+use forge_llm::{tier_from_id, Gateway, Generator, ModelTier, RateLimiter};
+use forge_store::{EventStore, PromptCache, Telemetry};
 use forge_tools::ToolRegistry;
+use rate_limit_gen::RateLimitedGenerator;
+use serde_json::Value;
+use session::now_rfc3339;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
+
+type CliGenerator = CachedGenerator<RateLimitedGenerator<Gateway>>;
 
 #[derive(Parser)]
 #[command(
@@ -79,6 +85,12 @@ enum Commands {
     Verify,
     /// Delega a tarefa ao squad multi-agente (requer sidecar Python).
     Squad { task: String },
+    /// Sobe o dashboard de telemetria (`.forge/telemetry.db`) em localhost.
+    Dashboard {
+        /// Porta local do dashboard.
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+    },
 }
 
 #[tokio::main]
@@ -106,12 +118,33 @@ async fn main() -> Result<()> {
             println!("(sidecar forge-squadd em implementação — Fase 4 do roadmap)");
             Ok(())
         }
+        Commands::Dashboard { port } => run_dashboard(port).await,
     }
 }
 
-/// Monta o gerador concreto (gateway + cache, salvo --no-cache) e valida
-/// que há providers configurados.
-fn prepare(opts: &RunOpts) -> Result<(CachedGenerator<Gateway>, PathBuf)> {
+/// Sobe o dashboard de telemetria lendo `.forge/telemetry.db` do diretório
+/// atual (criado, se ausente, por `run`/`chat`).
+async fn run_dashboard(port: u16) -> Result<()> {
+    let root = std::env::current_dir().context("diretório atual")?;
+    let forge_dir = root.join(".forge");
+    std::fs::create_dir_all(&forge_dir)?;
+    let telemetry = Telemetry::open(
+        forge_dir
+            .join("telemetry.db")
+            .to_str()
+            .unwrap_or(".forge/telemetry.db"),
+    )?;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    eprintln!("forge dashboard — http://{addr}");
+    forge_server::serve(telemetry, addr).await?;
+    Ok(())
+}
+
+/// Monta o gerador concreto (gateway + rate limit + cache, salvo
+/// --no-cache) e valida que há providers configurados. Telemetria
+/// (`.forge/telemetry.db`) registra `llm.call`/`cache.hit`/`cache.miss`
+/// sem nunca derrubar o caminho principal.
+fn prepare(opts: &RunOpts) -> Result<(CliGenerator, PathBuf)> {
     let gateway = Gateway::from_env();
     let available = gateway.available();
     if available.is_empty() {
@@ -120,10 +153,11 @@ fn prepare(opts: &RunOpts) -> Result<(CachedGenerator<Gateway>, PathBuf)> {
         );
     }
     let root = std::env::current_dir().context("diretório atual")?;
+    let tier = tier_from_id(&opts.model);
     eprintln!(
         "forge — modelo {} ({}) · agente {} · providers: {} · cache: {}",
         opts.model,
-        tier_name(tier_from_id(&opts.model)),
+        tier_name(tier),
         opts.agent,
         available.join(", "),
         if opts.no_cache { "off" } else { "on" }
@@ -142,7 +176,16 @@ fn prepare(opts: &RunOpts) -> Result<(CachedGenerator<Gateway>, PathBuf)> {
                 .unwrap_or(".forge/cache.db"),
         )?
     };
-    Ok((CachedGenerator::new(gateway, cache), root))
+    let telemetry = Telemetry::open(
+        forge_dir
+            .join("telemetry.db")
+            .to_str()
+            .unwrap_or(".forge/telemetry.db"),
+    )
+    .ok();
+    let limited =
+        RateLimitedGenerator::new(gateway, RateLimiter::for_tier(tier), telemetry.clone());
+    Ok((CachedGenerator::new(limited, cache, telemetry), root))
 }
 
 fn build_loop<'a, G: Generator>(
@@ -300,11 +343,15 @@ async fn chat_repl<G: Generator>(
     // lint consultivo e o comando /prompt; None se indisponível (degrada).
     let sidecar_session = sidecar::try_start().await;
     if sidecar_session.is_none() {
-        eprintln!(
-            "  (sidecar PromptForge indisponível — /prompt e o aviso de lint ficam desativados)"
-        );
+        eprintln!("  (sidecar PromptForge indisponível — render de geradores fica desativado; biblioteca continua ativa)");
     }
-    eprintln!("forge chat — digite a mensagem (vazio, \"sair\" ou Ctrl-D encerra; /compact força nova época; /prompt lista geradores)\n");
+    let library = forge_store::PromptLibrary::open(
+        root.join(".forge")
+            .join("prompt_library.db")
+            .to_str()
+            .unwrap_or(".forge/prompt_library.db"),
+    )?;
+    eprintln!("forge chat — digite a mensagem (vazio, \"sair\" ou Ctrl-D encerra; /compact força nova época; /prompt lista geradores; /prompt save|library|use|fav|rm gerencia a biblioteca)\n");
     let stdin = std::io::stdin();
     let mut turns = 0usize;
 
@@ -326,11 +373,8 @@ async fn chat_repl<G: Generator>(
             continue;
         }
         if let Some(rest) = input.strip_prefix("/prompt") {
-            if let Some((_, client)) = &sidecar_session {
-                handle_prompt_command(&mut client.clone(), rest.trim()).await;
-            } else {
-                eprintln!("  sidecar indisponível — geradores desativados");
-            }
+            let sidecar_client = sidecar_session.as_ref().map(|(_, c)| c.clone());
+            handle_prompt_command(sidecar_client, &library, rest.trim()).await;
             continue;
         }
         maybe_compact(generator, opts, &mut durable, &mut session, false).await?;
@@ -375,11 +419,23 @@ async fn chat_repl<G: Generator>(
     Ok(())
 }
 
-/// Trata `/prompt` no chat: sem argumentos (ou `list`) lista os geradores
-/// do sidecar; com `<gerador> chave=valor ...` renderiza e imprime o
-/// prompt (o usuário decide se cola como próxima mensagem).
-async fn handle_prompt_command(client: &mut forge_sidecar::SidecarClient, rest: &str) {
+/// Trata `/prompt` no chat. Sem argumentos (ou `list`) lista os geradores
+/// do sidecar; `<gerador> chave=valor ...` renderiza e imprime o prompt;
+/// `save <nome> [tags=a,b] <gerador> chave=valor ...` renderiza e grava na
+/// biblioteca (origem: prompte `library.js`); `library [tag]` lista os
+/// prompts salvos; `use <id>` reimprime um prompt salvo; `fav <id>`
+/// inverte o favorito; `rm <id>` remove. A biblioteca funciona mesmo sem
+/// sidecar — só `save` e o render bruto exigem o gerador Python ativo.
+async fn handle_prompt_command(
+    mut sidecar: Option<forge_sidecar::SidecarClient>,
+    library: &forge_store::PromptLibrary,
+    rest: &str,
+) {
     if rest.is_empty() || rest == "list" {
+        let Some(client) = sidecar.as_mut() else {
+            eprintln!("  sidecar indisponível — geradores desativados");
+            return;
+        };
         match client.list_generators().await {
             Ok(generators) => {
                 eprintln!("  geradores disponíveis:");
@@ -398,6 +454,135 @@ async fn handle_prompt_command(client: &mut forge_sidecar::SidecarClient, rest: 
         return;
     }
 
+    let first_token = rest.split_whitespace().next().unwrap_or("");
+    let command_arg = rest[first_token.len()..].trim();
+
+    if first_token == "library" {
+        let tag = if command_arg.is_empty() {
+            None
+        } else {
+            Some(command_arg)
+        };
+        match library.list(tag) {
+            Ok(prompts) if prompts.is_empty() => eprintln!("  biblioteca vazia"),
+            Ok(prompts) => {
+                eprintln!("  prompts salvos:");
+                for p in prompts {
+                    eprintln!(
+                        "    #{} {}{} [{}] — tags: {}",
+                        p.id,
+                        p.name,
+                        if p.favorite { " ★" } else { "" },
+                        p.generator,
+                        p.tags.join(", ")
+                    );
+                }
+            }
+            Err(e) => eprintln!("  falha ao listar biblioteca: {e}"),
+        }
+        return;
+    }
+
+    if first_token == "use" {
+        let Ok(id) = command_arg.parse::<i64>() else {
+            eprintln!("  uso: /prompt use <id>");
+            return;
+        };
+        match library.get(id) {
+            Ok(Some(p)) => eprintln!(
+                "  --- {} ({}) ---\n{}\n  ---------------------",
+                p.name, p.generator, p.rendered
+            ),
+            Ok(None) => eprintln!("  prompt #{id} não encontrado"),
+            Err(e) => eprintln!("  falha ao buscar prompt #{id}: {e}"),
+        }
+        return;
+    }
+
+    if first_token == "fav" {
+        let Ok(id) = command_arg.parse::<i64>() else {
+            eprintln!("  uso: /prompt fav <id>");
+            return;
+        };
+        match library.toggle_favorite(id) {
+            Ok(Some(state)) => eprintln!("  prompt #{id} favorito: {state}"),
+            Ok(None) => eprintln!("  prompt #{id} não encontrado"),
+            Err(e) => eprintln!("  falha ao favoritar #{id}: {e}"),
+        }
+        return;
+    }
+
+    if first_token == "rm" {
+        let Ok(id) = command_arg.parse::<i64>() else {
+            eprintln!("  uso: /prompt rm <id>");
+            return;
+        };
+        match library.delete(id) {
+            Ok(true) => eprintln!("  prompt #{id} removido"),
+            Ok(false) => eprintln!("  prompt #{id} não encontrado"),
+            Err(e) => eprintln!("  falha ao remover #{id}: {e}"),
+        }
+        return;
+    }
+
+    if first_token == "save" {
+        let Some(client) = sidecar.as_mut() else {
+            eprintln!("  sidecar indisponível — save exige o gerador Python ativo");
+            return;
+        };
+        let mut parts = command_arg.split_whitespace();
+        let Some(prompt_name) = parts.next() else {
+            eprintln!("  uso: /prompt save <nome> [tags=a,b] <gerador> chave=valor ...");
+            return;
+        };
+        let mut tags = Vec::new();
+        let mut generator_name = None;
+        let mut fields = std::collections::HashMap::new();
+        for token in parts {
+            if let Some(list) = token.strip_prefix("tags=") {
+                tags = list
+                    .split(',')
+                    .map(str::to_string)
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            } else if generator_name.is_none() {
+                generator_name = Some(token.to_string());
+            } else if let Some((k, v)) = token.split_once('=') {
+                fields.insert(k.to_string(), v.to_string());
+            }
+        }
+        let Some(generator_name) = generator_name else {
+            eprintln!("  uso: /prompt save <nome> [tags=a,b] <gerador> chave=valor ...");
+            return;
+        };
+        let fields_json: Value = fields
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+            .collect::<serde_json::Map<_, _>>()
+            .into();
+        match client.render(&generator_name, fields).await {
+            Ok(rendered) => {
+                match library.save(
+                    prompt_name,
+                    &generator_name,
+                    &fields_json,
+                    &rendered,
+                    &tags,
+                    &now_rfc3339(),
+                ) {
+                    Ok(id) => eprintln!("  prompt #{id} salvo na biblioteca"),
+                    Err(e) => eprintln!("  falha ao salvar na biblioteca: {e}"),
+                }
+            }
+            Err(e) => eprintln!("  falha ao renderizar {generator_name}: {e}"),
+        }
+        return;
+    }
+
+    let Some(client) = sidecar.as_mut() else {
+        eprintln!("  sidecar indisponível — render de geradores desativado");
+        return;
+    };
     let mut parts = rest.split_whitespace();
     let Some(name) = parts.next() else { return };
     let mut fields = std::collections::HashMap::new();

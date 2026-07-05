@@ -56,19 +56,22 @@ cargo run -p forge-cli -- chat
 tier-gated, TUI ratatui completa (diff colorido, seletor de modelo/agente)
 e Managed Tool Output Files.
 
-**Fase 3 em andamento** — primeira ativação real do gRPC: o sidecar Python
+**Fase 3 concluída** — ativação real do gRPC: o sidecar Python
 `forge_promptforge` expõe `PromptForgeService` (Lint/Render/ListGenerators)
 sobre Unix Domain Socket; `forge-sidecar` sobe e supervisiona o processo
 (`SidecarSupervisor`) e fala com ele (`SidecarClient`), com **degradação
 graciosa total** — sem `uv`/workspace Python, `run`/`chat`/`tui` seguem
 funcionando normalmente, só sem lint/geradores. `forge chat` ganhou
-`/prompt` (lista e renderiza geradores) e um aviso consultivo de lint por
-turno.
+`/prompt` (lista e renderiza geradores, `save`/`library`/`use`/`fav`/`rm`
+para a biblioteca de prompts) e um aviso consultivo de lint por turno.
+Rate limiting tier-gated (`forge-llm::RateLimiter`) e telemetria
+offline-first (`forge-store::Telemetry`) decoram o gateway; `forge
+dashboard` sobe um painel local (axum) sobre `.forge/telemetry.db`.
 
 ```sh
 export ANTHROPIC_API_KEY=...
 cargo run -p forge-cli -- tui --model claude-sonnet-5   # sidecar sobe sozinho se `uv` estiver disponível
+cargo run -p forge-cli -- dashboard                     # painel de telemetria em http://127.0.0.1:7878
 ```
 
-Restante da Fase 3: rate limiting por tier, biblioteca de prompts e
-telemetria + dashboard (`forge-server`).
+Próximo marco: Fase 4 (squad multi-agente via sidecar).
