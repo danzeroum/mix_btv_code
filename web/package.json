@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:integration": "pnpm build && playwright test --config=playwright.integration.config.ts"
   },
   "dependencies": {
     "react": "^19.2.7",
