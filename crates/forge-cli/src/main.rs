@@ -141,8 +141,12 @@ async fn run_dashboard(port: u16) -> Result<()> {
             .unwrap_or(".forge/telemetry.db"),
     )?;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    eprintln!("forge dashboard — http://{addr}");
-    forge_server::serve(telemetry, addr).await?;
+    let web_dir = forge_server::default_web_dir();
+    eprintln!(
+        "forge dashboard — http://{addr} (assets: {})",
+        web_dir.display()
+    );
+    forge_server::serve(telemetry, addr, web_dir).await?;
     Ok(())
 }
 
