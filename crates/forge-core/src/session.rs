@@ -12,6 +12,7 @@ use serde_json::json;
 
 pub const SESSION_STARTED: &str = "session.started.1";
 pub const MESSAGE: &str = "message.1";
+pub const EPOCH_STARTED: &str = "epoch.started.1";
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -36,6 +37,8 @@ pub struct DurableSession {
     head: i64,
     /// Quantas mensagens do histórico já estão persistidas.
     persisted: usize,
+    /// Época atual (incrementada a cada compaction).
+    epoch: usize,
 }
 
 impl DurableSession {
@@ -64,17 +67,29 @@ impl DurableSession {
                 messages,
                 head,
                 persisted: 0,
+                epoch: 0,
             });
         }
+        let mut epoch = 0usize;
         for event in store.read(session_id, 0)? {
-            if event.kind == MESSAGE {
-                let message: ChatMessage =
-                    serde_json::from_value(event.data).map_err(|e| SessionError::Malformed {
-                        session_id: session_id.to_string(),
-                        seq: event.seq,
-                        reason: e.to_string(),
+            match event.kind.as_str() {
+                MESSAGE => {
+                    let message: ChatMessage = serde_json::from_value(event.data).map_err(|e| {
+                        SessionError::Malformed {
+                            session_id: session_id.to_string(),
+                            seq: event.seq,
+                            reason: e.to_string(),
+                        }
                     })?;
-                messages.push(message);
+                    messages.push(message);
+                }
+                // Nova época: o que veio antes foi resumido — o replay
+                // recomeça do resumo (baseline da época).
+                EPOCH_STARTED => {
+                    epoch += 1;
+                    messages.clear();
+                }
+                _ => {}
             }
         }
         let persisted = messages.len();
@@ -84,7 +99,41 @@ impl DurableSession {
             messages,
             head,
             persisted,
+            epoch,
         })
+    }
+
+    /// Inicia uma nova época: grava `epoch.started.1` com o resumo e troca
+    /// o histórico em memória pela baseline resumida — atomicamente (os
+    /// dois eventos entram no mesmo append). Só chame em fronteira segura
+    /// ([`crate::compaction::CompactionPolicy::is_safe_boundary`]).
+    pub fn compact(&mut self, summary: &str) -> Result<(), SessionError> {
+        let baseline = ChatMessage::user_text(format!(
+            "[Contexto resumido da conversa anterior]\n{summary}"
+        ));
+        let baseline_event =
+            serde_json::to_value(&baseline).map_err(|e| SessionError::Malformed {
+                session_id: self.session_id.clone(),
+                seq: self.head,
+                reason: e.to_string(),
+            })?;
+        self.head = self.store.append(
+            &self.session_id,
+            self.head,
+            vec![
+                EventInput::new(EPOCH_STARTED, json!({"summary": summary})),
+                EventInput::new(MESSAGE, baseline_event),
+            ],
+        )?;
+        self.epoch += 1;
+        self.messages = vec![baseline];
+        self.persisted = 1;
+        Ok(())
+    }
+
+    /// Época atual (0 = nunca compactada).
+    pub fn epoch(&self) -> usize {
+        self.epoch
     }
 
     /// Persiste as mensagens novas do histórico (as além de `persisted`),
@@ -171,6 +220,44 @@ mod tests {
         assert!(matches!(
             err,
             SessionError::Store(EventError::Conflict { .. })
+        ));
+    }
+
+    #[test]
+    fn compaction_inicia_nova_epoca_e_replay_parte_do_resumo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        let path = path.to_str().unwrap();
+
+        {
+            let mut s = DurableSession::open(store_at(path), "ses_1", "t", "m").unwrap();
+            s.messages.push(ChatMessage::user_text("pergunta longa"));
+            s.messages.push(ChatMessage {
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: "resposta longa".into(),
+                }],
+            });
+            s.persist_new().unwrap();
+
+            s.compact("objetivo X; arquivo f.rs editado; pendência Y")
+                .unwrap();
+            assert_eq!(s.epoch(), 1);
+            assert_eq!(s.messages.len(), 1, "histórico vira só a baseline");
+
+            // a conversa continua na nova época
+            s.messages.push(ChatMessage::user_text("continua"));
+            s.persist_new().unwrap();
+        }
+
+        let s = DurableSession::open(store_at(path), "ses_1", "t", "m").unwrap();
+        assert_eq!(s.epoch(), 1);
+        // replay: baseline resumida + mensagem pós-época (as antigas ficam
+        // só no event log, não no histórico ativo)
+        assert_eq!(s.resumed_messages(), 2);
+        assert!(matches!(
+            &s.messages[0].content[0],
+            ContentBlock::Text { text } if text.contains("Contexto resumido")
         ));
     }
 

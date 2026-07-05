@@ -134,3 +134,20 @@ não precisa. Portados os módulos coerentes (detalhes no ADR 0002):
 
 Não portados: proxy reverso/`openapi-diff` (contrato legado), verificador
 de journal de migrations, crates acoplados ao opencode.
+
+## Fase 2 — epochs, compaction e TUI (2026-07-05)
+
+- **Context Epochs + compaction**: `compaction.rs` no forge-core — estimativa
+  de tokens chars/4 (tokenizer BPE real segue won't-do, herdado do fork),
+  política tier-gated (small compacta a ~75% da janela, demais a ~90%),
+  fronteira segura = último turno do assistente sem tool_use pendente
+  (nunca corta par tool_use/tool_result). O resumo é gerado pelo próprio
+  modelo sem ferramentas; `DurableSession::compact` grava `epoch.started.1`
+  + a baseline resumida num único append atômico e o replay recomeça da
+  última época. CLI: compaction automática antes de cada turno e `/compact`
+  manual no chat; `--context-window` configura a janela.
+- **TUI ratatui**: crate `forge-tui` com estado e render puros (testados via
+  TestBackend: transcript, streaming, modal de permissão, scroll) e comando
+  `forge tui` no CLI — loop de agente numa task tokio, UI na thread
+  principal, canais para eventos e resolver de permissão bloqueante
+  respondido pelo modal (s/n). Sessão durável e ledger integrados.

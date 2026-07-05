@@ -3,6 +3,7 @@ name = "forge-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "TUI da plataforma Forge (ratatui) — implementação na Fase 2"
+description = "TUI da plataforma Forge (ratatui): transcript, permissões, painel do squad"
 
 [dependencies]
+ratatui.workspace = true

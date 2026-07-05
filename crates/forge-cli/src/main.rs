@@ -7,11 +7,14 @@
 
 mod cache;
 mod session;
+mod tui_app;
 
 use anyhow::{bail, Context, Result};
 use cache::CachedGenerator;
 use clap::{Parser, Subcommand};
-use forge_core::{AgentLoop, DurableSession, LoopEvent, PermissionResolver, BUILD, PLAN};
+use forge_core::{
+    AgentLoop, CompactionPolicy, DurableSession, LoopEvent, PermissionResolver, BUILD, PLAN,
+};
 use forge_llm::chat::ChatMessage;
 use forge_llm::{tier_from_id, Gateway, Generator, ModelTier};
 use forge_store::{EventStore, PromptCache};
@@ -47,6 +50,9 @@ struct RunOpts {
     /// Retoma (ou nomeia) uma sessão durável; sem valor, cria uma nova.
     #[arg(long)]
     session: Option<String>,
+    /// Janela de contexto do modelo, em tokens (para a compaction).
+    #[arg(long, default_value_t = 200_000)]
+    context_window: usize,
 }
 
 #[derive(Subcommand)]
@@ -60,6 +66,11 @@ enum Commands {
     },
     /// Abre o REPL de conversa multi-turno.
     Chat {
+        #[command(flatten)]
+        opts: RunOpts,
+    },
+    /// Abre a interface de terminal (ratatui).
+    Tui {
         #[command(flatten)]
         opts: RunOpts,
     },
@@ -80,6 +91,10 @@ async fn main() -> Result<()> {
         Commands::Chat { opts } => {
             let (generator, root) = prepare(&opts)?;
             chat_repl(&generator, &opts, &root).await
+        }
+        Commands::Tui { opts } => {
+            let (generator, root) = prepare(&opts)?;
+            tui_app::run_tui(std::sync::Arc::new(generator), opts, root).await
         }
         Commands::Verify => {
             println!("forge verify — pipeline em implementação (Fase 5 do roadmap)");
@@ -179,6 +194,42 @@ fn open_durable(root: &std::path::Path, opts: &RunOpts, task_hint: &str) -> Resu
     Ok(durable)
 }
 
+/// Compacta a sessão se a política mandar e a fronteira for segura.
+/// Retorna true se uma nova época começou.
+async fn maybe_compact<G: Generator>(
+    generator: &G,
+    opts: &RunOpts,
+    durable: &mut DurableSession,
+    session: &mut session::Session,
+    force: bool,
+) -> Result<bool> {
+    let policy = CompactionPolicy::for_tier(tier_from_id(&opts.model), opts.context_window);
+    if !(force || policy.needs_compaction(&durable.messages)) {
+        return Ok(false);
+    }
+    if !CompactionPolicy::is_safe_boundary(&durable.messages) {
+        if force {
+            eprintln!("  compaction adiada: fronteira insegura (turno incompleto)");
+        }
+        return Ok(false);
+    }
+    let summary = policy
+        .summarize(generator, &opts.model, &durable.messages)
+        .await
+        .map_err(|e| anyhow::anyhow!("compaction: {e}"))?;
+    durable.compact(&summary)?;
+    session.note(
+        "compaction.applied",
+        serde_json::json!({"epoch": durable.epoch(), "summary_chars": summary.len()}),
+    );
+    eprintln!(
+        "  ⟲ contexto compactado — época {} ({} chars de resumo)",
+        durable.epoch(),
+        summary.len()
+    );
+    Ok(true)
+}
+
 async fn run_once<G: Generator>(
     generator: &G,
     opts: &RunOpts,
@@ -191,6 +242,7 @@ async fn run_once<G: Generator>(
     let mut durable = open_durable(root, opts, &task)?;
     let mut resolver = CliResolver { auto_yes: opts.yes };
 
+    maybe_compact(generator, opts, &mut durable, &mut session, false).await?;
     durable.messages.push(ChatMessage::user_text(&task));
     let result = {
         let mut on_event = |event: LoopEvent| {
@@ -234,7 +286,7 @@ async fn chat_repl<G: Generator>(
     let mut resolver = CliResolver { auto_yes: opts.yes };
 
     let mut durable = open_durable(root, opts, "<chat>")?;
-    eprintln!("forge chat — digite a mensagem (vazio, \"sair\" ou Ctrl-D encerra)\n");
+    eprintln!("forge chat — digite a mensagem (vazio, \"sair\" ou Ctrl-D encerra; /compact força nova época)\n");
     let stdin = std::io::stdin();
     let mut turns = 0usize;
 
@@ -249,6 +301,13 @@ async fn chat_repl<G: Generator>(
         if input.is_empty() || matches!(input, "sair" | "exit" | "quit") {
             break;
         }
+        if input == "/compact" {
+            if !maybe_compact(generator, opts, &mut durable, &mut session, true).await? {
+                eprintln!("  nada a compactar");
+            }
+            continue;
+        }
+        maybe_compact(generator, opts, &mut durable, &mut session, false).await?;
 
         session.note("user.turn", serde_json::json!({"chars": input.len()}));
         durable.messages.push(ChatMessage::user_text(input));

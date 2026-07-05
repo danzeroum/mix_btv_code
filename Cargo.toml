@@ -37,6 +37,8 @@ ignore = "0.4"
 grep = "0.3"
 time = { version = "0.3", features = ["formatting"] }
 tempfile = "3"
+ratatui = "0.29"
+crossterm = "0.28"
 
 forge-schemas = { path = "crates/forge-schemas" }
 forge-core = { path = "crates/forge-core" }
@@ -44,3 +46,4 @@ forge-llm = { path = "crates/forge-llm" }
 forge-store = { path = "crates/forge-store" }
 forge-tools = { path = "crates/forge-tools" }
 forge-verify = { path = "crates/forge-verify" }
+forge-tui = { path = "crates/forge-tui" }
