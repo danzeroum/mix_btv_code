@@ -105,6 +105,10 @@ async fn squad_python_real_streama_eventos_pelo_laco_bidirecional() {
             description: "publicar serviço de pagamentos".into(),
             decision_type: "architecture".into(),
             max_autonomy_level: 3,
+            // Sem evidência (Fase 5 Onda 3) — este teste é do laço 4d, não
+            // exercita validate_results; o auditor cai em fail-closed sem
+            // afetar as asserções deste teste (proposals/consensus/steps).
+            verification_evidence_json: String::new(),
         })
         .await
         .expect("ExecuteTask deveria abrir o stream");
@@ -242,6 +246,10 @@ async fn kill_do_sidecar_dispara_fallback() {
             description: "tarefa interrompida".into(),
             decision_type: "architecture".into(),
             max_autonomy_level: 3,
+            // Sem evidência (Fase 5 Onda 3) — este teste é do laço 4d, não
+            // exercita validate_results; o auditor cai em fail-closed sem
+            // afetar as asserções deste teste (proposals/consensus/steps).
+            verification_evidence_json: String::new(),
         })
         .await
         .expect("ExecuteTask deveria abrir o stream");

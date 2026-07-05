@@ -13,10 +13,12 @@ uma chamada real ao gateway, que produz o veredito. O modelo nunca
 aprova automaticamente por ausência de achados críticos — é instruído a
 considerar o contexto da tarefa, não só a lista de achados.
 
-Consumir evidência determinística do `/verify` completo (Rust,
-`forge-verify`) é escopo da Fase 5 — este agente audita com o que tem
-disponível na Fase 4 (achados de padrão + métricas simples), sem invadir
-o que a Fase 5 vai construir.
+Fase 5 Onda 3: `validate_results` passa a receber a evidência real do
+`/verify` (Rust, `forge-verify`) — a `verification-evidence.v1` que o
+`forge squad` roda sobre o workspace e anexa ao `SquadTask` antes de
+disparar a tarefa. `check_security`/`check_quality` continuam (baratos,
+complementares); a evidência do `/verify` é entrada adicional para o
+gateway, nunca decisão automática — o veredito ainda vem do modelo.
 """
 
 from __future__ import annotations
@@ -49,7 +51,7 @@ Responda SOMENTE com um objeto JSON:
   "issues": ["lista de strings — problemas encontrados nos resultados, se houver"],
   "agent_scores": {"nome_do_agente": 0.0}
 }
-Avalie cada resultado pelo conteúdo real reportado (sucesso, confiança declarada, presença de erros) — não aprove por padrão."""
+Avalie cada resultado pelo conteúdo real reportado (sucesso, confiança declarada, presença de erros) — não aprove por padrão. Quando houver evidência determinística de verificação (`verification_evidence` — typecheck/test/lint/SAST reais), pese o veredito e os achados dela — um veredito "fail" ou achados de severidade alta pesam contra a aprovação, mas a decisão final ainda é sua, considerando o contexto da tarefa."""
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -119,20 +121,32 @@ class AuditorAgent(BaseAgent):
         judgment = self._parse_judgment(raw.text)
         return {"issues": issues, "warnings": warnings, **judgment}
 
-    async def validate_results(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+    async def validate_results(
+        self, results: list[dict[str, Any]], evidence: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Pede ao gateway um veredito real sobre os resultados agregados
-        de outros agentes (usado pelo orquestrador ao final de um plano)."""
+        de outros agentes (usado pelo orquestrador ao final de um plano).
+
+        `evidence` é a `verification-evidence.v1` real do `/verify` (Fase 5
+        Onda 3), quando disponível — entra no payload como contexto
+        adicional para o gateway pesar; o veredito continua vindo do
+        modelo, nunca é derivado automaticamente da evidência sozinha (ver
+        `test_validade_pass_nao_forca_aprovacao_sozinha`)."""
 
         if self.gateway is None:
             raise RuntimeError(
                 "AuditorAgent sem gateway anexado — chame attach_gateway() antes de execute()"
             )
 
+        payload: dict[str, Any] = {"results": results}
+        if evidence is not None:
+            payload["verification_evidence"] = evidence
+
         request = LlmRequest(
             model=self.model,
             messages=[
                 {"role": "system", "content": _VALIDATE_RESULTS_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps({"results": results}, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             requester=self.agent_type,
         )

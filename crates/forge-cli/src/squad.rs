@@ -193,12 +193,31 @@ async fn try_squad(
         .map_err(|e| e.to_string())?;
 
     let mut session = Session::open(root, task, &opts.model).map_err(|e| e.to_string())?;
+
+    // Fase 5 Onda 3: roda o /verify sobre o workspace atual ANTES do squad e
+    // anexa a evidência ao SquadTask — é isso que tira o auditor do vácuo
+    // (julgar código no ar) e o coloca julgando sobre fatos determinísticos.
+    // Evidência ausente/inválida do outro lado (server.py) é fail-closed, não
+    // "sem evidência = ok" — por isso preferimos propagar um erro aqui a
+    // enviar uma string vazia silenciosamente se o pipeline falhar ao rodar.
+    eprintln!("  ⏱ rodando /verify sobre o workspace antes do squad (evidência para o auditor)…");
+    let evidence = crate::run_verify_pipeline(root, None)
+        .map_err(|e| format!("falha ao rodar /verify antes do squad: {e}"))?;
+    eprintln!(
+        "  ✓ /verify concluído — veredito {:?} ({} passo(s))",
+        evidence.verdict,
+        evidence.steps.len()
+    );
+    let verification_evidence_json = serde_json::to_string(&evidence)
+        .map_err(|e| format!("falha ao serializar evidência: {e}"))?;
+
     let stream = client
         .execute_task(SquadTask {
             task_id: format!("s{pid:x}", pid = std::process::id()),
             description: task.to_string(),
             decision_type: "architecture".into(),
             max_autonomy_level: 3,
+            verification_evidence_json,
         })
         .await
         .map_err(|e| e.to_string())?;

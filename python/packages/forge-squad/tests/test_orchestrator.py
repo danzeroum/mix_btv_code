@@ -133,6 +133,43 @@ def test_event_sink_emite_eventos_ao_vivo_na_ordem(tmp_path):
     assert consensus_ev["requires_human"] is False
 
 
+def test_verification_evidence_missing_e_fail_closed_sem_chamar_o_gateway(tmp_path):
+    # Fase 5 Onda 3 / ADR 0008: quando o task veio do SquadTask com a
+    # evidência ausente/inválida, verification_evidence_missing=True deve
+    # reprovar ANTES de chamar validate_results — não é "sem evidência = ok".
+    gateway = _gateway(0.9, 0.2, 0.2, approved=True)  # aprovaria se chamado
+    orch = UnifiedOrchestrator(gateway, memory=AgentMemorySystem(storage_dir=tmp_path))
+
+    result = asyncio.run(
+        orch.execute_complex_task({"description": "tarefa", "verification_evidence_missing": True})
+    )
+
+    assert result["success"] is False
+    assert "fail-closed" in result["validation"]["issues"][0]
+    # o gateway nunca foi chamado com requester="auditor" para validate_results —
+    # só as 3 chamadas de proposta (architect/developer/auditor) do plano.
+    auditor_calls = [c for c in gateway.calls if c.requester == "auditor"]
+    assert len(auditor_calls) == 1  # só a proposta em _get_squad_proposals, não validate_results
+
+
+def test_verification_evidence_presente_flui_para_validate_results(tmp_path):
+    # Sem a flag de ausência, a evidência (se houver) deve chegar ao
+    # auditor via validate_results — comportamento normal preservado.
+    gateway = _gateway(0.9, 0.2, 0.2, approved=True)
+    orch = UnifiedOrchestrator(gateway, memory=AgentMemorySystem(storage_dir=tmp_path))
+    evidence = {"run_id": "r1", "git_sha": "sha", "steps": [], "verdict": "pass", "produced_at": "2026-01-01T00:00:00Z"}
+
+    result = asyncio.run(
+        orch.execute_complex_task({"description": "tarefa", "verification_evidence": evidence})
+    )
+
+    assert result["success"] is True
+    auditor_calls = [c for c in gateway.calls if c.requester == "auditor"]
+    assert len(auditor_calls) == 2  # proposta + validate_results (chamou o gateway de verdade)
+    # a evidência de fato foi enviada na segunda chamada (validate_results).
+    assert "verification_evidence" in auditor_calls[1].messages[1]["content"]
+
+
 def test_propostas_sao_envolvidas_em_proposal_e_consenso_computa(tmp_path):
     # Se o wrapping Proposal(...) falhasse, reach_consensus levantaria; aqui
     # provamos que o consenso computou um decision_maker real.

@@ -137,7 +137,24 @@ class UnifiedOrchestrator:
                 }
 
         execution_results = await self._execute_plan_steps(plan, task)
-        final_validation = await self.agents["auditor"].validate_results(execution_results)
+
+        # Fase 5 Onda 3: quando o task veio do SquadTask (server.py) e o
+        # campo verification_evidence_json existia mas era vazio/inválido,
+        # `verification_evidence_missing` vem True — fail-closed ANTES de
+        # chamar o gateway, sem custar uma chamada de LLM que já sabemos que
+        # não pode aprovar. Chamadas diretas ao orquestrador (sem esse campo,
+        # como nos testes) nunca setam essa flag — comportamento inalterado.
+        if task.get("verification_evidence_missing", False):
+            final_validation = {
+                "approved": False,
+                "confidence": 0.0,
+                "issues": ["evidência de verificação ausente ou inválida — fail-closed"],
+                "agent_scores": {},
+            }
+        else:
+            final_validation = await self.agents["auditor"].validate_results(
+                execution_results, evidence=task.get("verification_evidence")
+            )
         overall_success = bool(final_validation.get("approved", False))
 
         # ADR 0006: o portão não registra mais; quem executa registra o

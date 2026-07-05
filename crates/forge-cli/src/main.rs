@@ -173,6 +173,36 @@ async fn run_dashboard(port: u16) -> Result<()> {
     Ok(())
 }
 
+/// Carrega `forge.toml` (`root/forge.toml` se `config` for `None`) ou cai no
+/// default que espelha o job `rust` do CI, e roda o pipeline determinístico.
+/// Compartilhado entre `forge verify` e `forge squad` (Fase 5 Onda 3: o squad
+/// roda o mesmo `/verify` antes de disparar a tarefa, anexando a evidência
+/// ao `SquadTask`) — evita duplicar a lógica de carregar config + rodar.
+pub(crate) fn run_verify_pipeline(
+    root: &std::path::Path,
+    config: Option<&std::path::Path>,
+) -> Result<forge_schemas::verification::VerificationEvidence> {
+    let config_path = config
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| root.join("forge.toml"));
+    let steps = match forge_verify::config::load_config(&config_path)
+        .with_context(|| format!("lendo {}", config_path.display()))?
+    {
+        Some(cfg) => cfg.to_step_specs(),
+        None => forge_verify::config::default_steps(),
+    };
+
+    let run_id = format!("run-{:x}", nanos_now() & 0xffff_ffff_ffff);
+    let sha = git_sha().unwrap_or_else(|| "unknown".to_string());
+    let produced_at = now_rfc3339();
+    Ok(forge_verify::run_pipeline(
+        &run_id,
+        &sha,
+        &produced_at,
+        &steps,
+    ))
+}
+
 /// Roda `/verify`: carrega `forge.toml` (ou cai no default, que espelha o
 /// job `rust` do CI) na raiz do diretório atual, executa o pipeline
 /// determinístico e grava `verification-evidence.v1` em disco.
@@ -191,19 +221,8 @@ fn run_verify(config: Option<PathBuf>, out: Option<PathBuf>, format: VerifyForma
     let forge_dir = root.join(".forge");
     std::fs::create_dir_all(&forge_dir)?;
 
-    let config_path = config.unwrap_or_else(|| root.join("forge.toml"));
-    let steps = match forge_verify::config::load_config(&config_path)
-        .with_context(|| format!("lendo {}", config_path.display()))?
-    {
-        Some(cfg) => cfg.to_step_specs(),
-        None => forge_verify::config::default_steps(),
-    };
-
-    let run_id = format!("run-{:x}", nanos_now() & 0xffff_ffff_ffff);
-    let sha = git_sha().unwrap_or_else(|| "unknown".to_string());
-    let produced_at = now_rfc3339();
-
-    let evidence = forge_verify::run_pipeline(&run_id, &sha, &produced_at, &steps);
+    let evidence = run_verify_pipeline(&root, config.as_deref())?;
+    let run_id = evidence.run_id.clone();
 
     let out_path = out.unwrap_or_else(|| forge_dir.join("evidence").join(format!("{run_id}.json")));
     if let Some(parent) = out_path.parent() {
@@ -215,7 +234,7 @@ fn run_verify(config: Option<PathBuf>, out: Option<PathBuf>, format: VerifyForma
     match format {
         VerifyFormat::Json => println!("{json}"),
         VerifyFormat::Human => {
-            println!("forge verify — run {run_id} ({sha})");
+            println!("forge verify — run {run_id} ({})", evidence.git_sha);
             for step in &evidence.steps {
                 let mark = if step.exit_code == 0 { "✓" } else { "✗" };
                 println!(

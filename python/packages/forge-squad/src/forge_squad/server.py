@@ -93,6 +93,30 @@ def _to_squad_event(task_id: str, event: dict[str, Any]) -> squad_pb2.SquadEvent
     return ev
 
 
+def _parse_verification_evidence(raw: str) -> tuple[Optional[dict[str, Any]], bool]:
+    """Parseia `SquadTask.verification_evidence_json` (Fase 5 Onda 3, ADR
+    0008). Retorna `(evidencia, ausente_ou_invalida)`.
+
+    proto3 zera campo string ausente para `""` — sem tratamento explícito,
+    isso viraria silenciosamente "sem evidência, tudo bem" no orquestrador,
+    o mesmo tipo de default otimista que a régua "Nada Fake" proíbe. Por
+    isso o segundo valor de retorno é explícito: `True` sempre que a
+    evidência não pôde ser recuperada (ausente, JSON inválido, ou não é um
+    objeto), para o orquestrador tratar como fail-closed."""
+
+    if not raw:
+        return None, True
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("verification_evidence_json inválido — tratando como ausente (fail-closed)")
+        return None, True
+    if not isinstance(parsed, dict):
+        logger.warning("verification_evidence_json não é um objeto JSON — tratando como ausente (fail-closed)")
+        return None, True
+    return parsed, False
+
+
 class SquadServicer(squad_pb2_grpc.SquadServiceServicer):
     """Roda o orquestrador e streama seus eventos como `SquadEvent`."""
 
@@ -105,10 +129,13 @@ class SquadServicer(squad_pb2_grpc.SquadServiceServicer):
         return squad_pb2.HealthResponse(ready=True, version=VERSION)
 
     async def ExecuteTask(self, request, context):  # noqa: N802
+        evidence, evidence_missing = _parse_verification_evidence(request.verification_evidence_json)
         task = {
             "task_id": request.task_id,
             "description": request.description,
             "decision_type": request.decision_type or "architecture",
+            "verification_evidence": evidence,
+            "verification_evidence_missing": evidence_missing,
         }
         queue: asyncio.Queue = asyncio.Queue()
 

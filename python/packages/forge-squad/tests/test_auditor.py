@@ -90,6 +90,51 @@ def test_validate_results_deriva_veredito_agregado_do_gateway():
     assert validation["agent_scores"] == {"architect": 0.9, "developer": 0.4}
 
 
+def test_validate_results_repassa_evidencia_real_ao_gateway():
+    # A evidência determinística do /verify (Fase 5 Onda 3) precisa
+    # efetivamente chegar na mensagem enviada ao gateway — mesmo padrão do
+    # "achados determinísticos são repassados como evidência" (execute()).
+    payload = {"approved": True, "confidence": 0.8, "issues": [], "agent_scores": {}}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    evidence = {
+        "run_id": "run-1",
+        "git_sha": "deadbeef",
+        "steps": [{"name": "test", "tool": "cargo test", "exit_code": 1, "duration_ms": 10, "findings": []}],
+        "verdict": "fail",
+        "produced_at": "2026-01-01T00:00:00Z",
+    }
+    asyncio.run(agent.validate_results([{"agent": "developer", "success": True}], evidence=evidence))
+
+    sent_content = gateway.requests[0].messages[1]["content"]
+    assert "verification_evidence" in sent_content
+    assert "deadbeef" in sent_content
+    assert '"verdict": "fail"' in sent_content or '"verdict":"fail"' in sent_content
+
+
+def test_validate_pass_nao_forca_aprovacao_sozinha():
+    # Evidência com verdict "pass" não deve forçar approved=True — o
+    # veredito ainda vem do modelo, senão a evidência boa vira carimbo
+    # automático (inverteria a régua "Nada Fake" para o sentido oposto).
+    payload = {"approved": False, "confidence": 0.3, "issues": ["regressão funcional não coberta pelo /verify"], "agent_scores": {}}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    evidence = {
+        "run_id": "run-2",
+        "git_sha": "cafebabe",
+        "steps": [{"name": "test", "tool": "cargo test", "exit_code": 0, "duration_ms": 10, "findings": []}],
+        "verdict": "pass",
+        "produced_at": "2026-01-01T00:00:00Z",
+    }
+    validation = asyncio.run(agent.validate_results([{"agent": "developer", "success": True}], evidence=evidence))
+
+    assert validation["approved"] is False
+
+
 def test_execute_sem_gateway_levanta_erro_claro():
     agent = AuditorAgent()
     try:

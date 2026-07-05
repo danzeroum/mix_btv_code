@@ -18,6 +18,11 @@ message SquadTask {
   string decision_type = 3;
   // Nível máximo de autonomia permitido (autonomia progressiva).
   uint32 max_autonomy_level = 4;
+  // `verification-evidence.v1` serializada (forge-verify::run_pipeline),
+  // rodada pelo `forge squad` antes de disparar a tarefa — Fase 5 Onda 3.
+  // Ausente/inválida (string vazia ou JSON malformado) é tratado como
+  // fail-closed pelo lado Python (server.py), nunca como "sem evidência = ok".
+  string verification_evidence_json = 5;
 }
 
 message SquadEvent {
