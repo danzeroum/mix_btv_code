@@ -216,11 +216,11 @@ como arquivos separados mas sem chamador real (ver ADR 0004).
 | Keys de API vazarem | Keys só no processo Rust; Python conhece só o UDS (princípio do proxy do prompte) |
 | Segurança de bash/skills de terceiros | Permissões no core Rust (não contornáveis), skill-vetter bloqueante, sandbox Docker, gitleaks |
 
-## Estado atual (Fases 1–3 concluídas; Fase 4 não iniciada)
+## Estado atual (Fases 1–4 concluídas; Fase 5 não iniciada)
 
 Histórico completo, decisão a decisão, em `docs/DECISOES.md`. Resumo do que já
-compila e está testado no workspace (raiz deste repositório): 101 testes Rust +
-19 Python, clippy `-D warnings` e rustfmt limpos.
+compila e está testado no workspace (raiz deste repositório): 104 testes Rust +
+112 Python, clippy `-D warnings` e rustfmt limpos.
 
 - **Fase 1 — fundação executável**: gateway LLM real com streaming SSE
   (Anthropic/OpenAI/DeepSeek, fallback automático), cache de prompt por hash
@@ -237,22 +237,33 @@ compila e está testado no workspace (raiz deste repositório): 101 testes Rust 
   (`forge-store::Telemetry`), biblioteca de prompts (`/prompt
   save|library|use|fav|rm`), dashboard de métricas (`forge-server` + `forge
   dashboard`).
-- **Contratos**: 3 protos gRPC (`core`, `squad`, `llm` — só `promptforge`
-  ativado até agora), 6 JSON Schemas versionados e fixtures de paridade do
-  hash de cache validadas pelos dois lados.
-- **Python**: só `forge-promptforge` está ativo de verdade (servidor gRPC
-  real). `forge-squad` continua com apenas o consenso ponderado migrado
-  (`weighted_voting.py`) — o motor multi-agente do BuildToValue
-  (orquestrador, planejamento, roteamento, memória, HITL) ainda não foi
-  portado; é o escopo da Fase 4. **ADR 0004** já resolveu, por leitura
-  direta do código de origem, qual lineage é canônica (`UnifiedOrchestrator`
-  + `BaseAgent` + 5 agentes reais) e qual é lineage superada a descartar
-  (`AgentOrchestrator`/`SafeAgentBase`/`SquadOrchestrator`/
-  `continuous_eval.py`) — o checklist de porte por onda já reflete isso.
+- **Fase 4 — squad multi-agente como motor (ADRs 0004–0007)**: os 4 protos
+  gRPC (`core`/`squad`/`llm`/`promptforge`) ativados nos dois lados; o
+  sidecar Python `forge_squad` roda o `UnifiedOrchestrator` (5 agentes
+  reais via gateway, consenso ponderado, `AdaptivePlanner`, `LearningRouter`,
+  `AgentMemorySystem`, `ProgressiveAutonomyManager`, `ContinuousEvaluator`)
+  e streama `SquadEvent`s; `CoreService` (Rust) atende os callbacks
+  `Generate`/`RequestPermission` (keys só no Rust). `forge squad` renderiza
+  ao vivo, grava o consenso no ledger e degrada em 3 níveis (squad →
+  agente-único → safe-mode). Provado por testes cross-process reais
+  (`squad_e2e.rs` + `kill -9`).
+- **Contratos**: 4 protos gRPC ativos, 6 JSON Schemas versionados e
+  fixtures de paridade do hash de cache validadas pelos dois lados.
+- **"Nada Fake" aplicado onda a onda**: a inspeção do BuildToValue
+  encontrou fabricação escondida atrás de defaults em cada camada
+  (`create_plan`/`_decompose_task` com constantes, o veredito do auditor
+  por fórmula de pontos, o `ContinuousEvaluator` com `technical_score`
+  fixo 0.8, a aprovação HITL sempre `true`, o `_execute_action` morto) —
+  todas corrigidas para derivar de raciocínio real, com fallback honesto
+  (ADRs 0005/0006/0007). Lineage superada descartada por leitura direta
+  do código (`AgentOrchestrator`/`SafeAgentBase`/`SquadOrchestrator`/
+  `continuous_eval.py`/`adaptive_replanner.py`/`hierarchical_planner.py`,
+  ADR 0004).
 - **Operação**: justfile, CI GitHub Actions (cargo/pytest/gitleaks
-  bloqueante), ADRs 0001–0003, script de regeneração de fixtures.
+  bloqueante), ADRs 0001–0007, script de regeneração de fixtures.
 
-**Próximo marco: Fase 4 — squad multi-agente como motor central.** Ver
-seção da Fase 4 acima para o escopo completo (migração do
-`UnifiedOrchestrator`, agentes reais via gateway Rust, `SquadService`
-bidirecional, HITL na TUI, fallback progressivo funcional).
+**Próximo marco: Fase 5 — verificação, review e governança.** `/verify`
+completo com evidência `verification-evidence.v1`, auditor consumindo
+evidência determinística real, skill-vetter, `forge_review` + quality
+gates + certificação, self-hosting (a plataforma passa no próprio
+`/verify`).

@@ -74,4 +74,28 @@ cargo run -p forge-cli -- tui --model claude-sonnet-5   # sidecar sobe sozinho s
 cargo run -p forge-cli -- dashboard                     # painel de telemetria em http://127.0.0.1:7878
 ```
 
-Próximo marco: Fase 4 (squad multi-agente via sidecar).
+**Fase 4 concluída** — squad multi-agente como motor, com o **gRPC
+bidirecional** ativado de ponta a ponta (ADRs 0004–0007). O sidecar Python
+`forge_squad` roda o `UnifiedOrchestrator` (5 agentes reais —
+architect/developer/auditor/designer/ops — consenso ponderado, planejamento
+adaptativo, HITL/autonomia progressiva) e streama `SquadEvent`s ao vivo
+(propostas → consenso → handoffs → steps); os agentes obtêm LLM e decisões
+de permissão de volta do Rust via `CoreService` (as API keys ficam só no
+Rust — o Python só conhece o UDS). `forge squad "..."` degrada em **3
+níveis** se o squad falhar: squad → agente-único → safe-mode read-only. O
+laço inteiro é coberto por um teste cross-process real (Rust ⇄ Python) e um
+teste de `kill -9` que prova o fallback.
+
+```sh
+export ANTHROPIC_API_KEY=...
+cargo run -p forge-cli -- squad "adicione paginação ao endpoint de pedidos"
+```
+
+Princípio "Nada Fake" mantido a cada onda: onde a origem escondia
+fabricação atrás de um default (`create_plan` com constantes, o veredito
+do auditor por fórmula, o evaluator com `technical_score` fixo, a aprovação
+HITL sempre `true`), a versão portada deriva tudo de raciocínio real do
+modelo, com fallback honesto quando o parsing falha.
+
+Próximo marco: Fase 5 (verificação, review e governança — `/verify` com
+evidência JSON, `forge_review` com quality gates, self-hosting).

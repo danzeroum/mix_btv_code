@@ -40,8 +40,25 @@ just test | just lint | just verify    # atalhos (requer just)
 ## Roadmap e estado
 
 Plano completo em `docs/PLANO-PLATAFORMA-FORGE.md` (6 fases). Estado atual:
-**Fase 3 concluída** (ver histórico completo em `docs/DECISOES.md`).
-Ativação real do gRPC (ADR 0003): contrato em
+**Fase 4 concluída** (ver histórico completo em `docs/DECISOES.md`;
+próximo marco: Fase 5 — `/verify` com evidência, `forge_review`,
+self-hosting).
+
+**Fase 4 — squad multi-agente + gRPC bidirecional (ADRs 0004–0007):** o
+sidecar Python `forge_squad` roda o `UnifiedOrchestrator` (5 agentes
+reais, consenso ponderado, planejamento adaptativo, HITL) e expõe
+`SquadService.ExecuteTask → stream SquadEvent`; os agentes chamam de volta
+o `CoreService` Rust (`Generate`/`RequestPermission`) — keys só no Rust, o
+Python só conhece o UDS. `forge squad` renderiza os eventos ao vivo,
+registra o consenso no ledger e degrada em 3 níveis (squad → agente-único
+→ safe-mode). Regra "Nada Fake" aplicada onda a onda: onde a origem
+escondia fabricação atrás de um default, o porte deriva tudo de raciocínio
+real (ver ADR 0005/0007). Dois achados de interop registrados: o
+`grpc.default_authority` (grpc-python↔tonic sobre UDS) e o `process_group`
+kill (`uv run` orfanava o Python). Provado por testes cross-process reais
+(`squad_e2e.rs` + o `kill -9` do fallback).
+
+Fase 3 (ADR 0003): ativação real do gRPC — contrato em
 `schemas/proto/promptforge.proto`; `forge-proto/build.rs` compila via
 tonic-build com protoc vendorizado (`protoc-bin-vendored`, sem exigir
 protoc de sistema); `scripts/gen_proto_py.py` gera os stubs Python
@@ -63,7 +80,7 @@ composto por baixo do `CachedGenerator` — hit de cache nunca consome vaga);
 falhas nunca derrubam o caminho principal); `/prompt
 save|library|use|fav|rm` no chat (biblioteca de prompts); `forge-server`
 (axum) + comando `forge dashboard` servindo `.forge/telemetry.db` num
-painel local em `127.0.0.1`. Próximo marco: Fase 4 (squad multi-agente).
+painel local em `127.0.0.1`.
 
 ## Convenções
 
