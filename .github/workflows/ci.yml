@@ -55,3 +55,21 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Self-hosting (Fase 5 Onda 6, ADR 0010): a plataforma se verifica com sua
+  # própria ferramenta. Job separado do `rust` de propósito — não arrisca o
+  # gate que já funciona; a fusão dos dois é possível depois. `forge verify`
+  # já sai com exit ≠0 em veredito Fail (Onda 2) — isso sozinho é o gate;
+  # o artefato é só a evidência anexada ao run para auditoria.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p forge-cli -- verify --out verification-evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verification-evidence
+          path: verification-evidence.json

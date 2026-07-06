@@ -40,9 +40,27 @@ just test | just lint | just verify    # atalhos (requer just)
 ## Roadmap e estado
 
 Plano completo em `docs/PLANO-PLATAFORMA-FORGE.md` (6 fases). Estado atual:
-**Fase 4 concluída** (ver histórico completo em `docs/DECISOES.md`;
-próximo marco: Fase 5 — `/verify` com evidência, `forge_review`,
-self-hosting).
+**Fase 5 concluída** (ver histórico completo em `docs/DECISOES.md`;
+próximo marco: Fase 6 — LSP/MCP, plugins de terceiros com sandbox, RAG,
+A/B testing, k6).
+
+**Fase 5 — verificação, review e governança (ADRs 0008–0010), 6 ondas:**
+`/verify` (`crates/forge-verify`) roda um pipeline configurável
+(timeout + kill de *grupo* de processos, parsers reais para
+cargo test/clippy/ruff) e produz `verification-evidence.v1`; `forge
+verify` grava a evidência em disco e sai com código ≠0 em veredito
+`Fail`. O squad roda `/verify` antes de cada tarefa e anexa a evidência
+ao `SquadTask` (ADR 0008); o auditor Python julga sobre ela e
+reprova automaticamente, sem chamar o gateway, quando ausente/inválida
+(fail-closed). `forge_review` pondera quatro reviewers, mas
+`gates.evaluate` sobrepõe a média com regras duras (finding crítico,
+veredito fail, piso de segurança) que nenhuma média alta salva;
+`certification.certify` produz o artefato com hash de evidência,
+registrável no ledger. O skill-vetter (`forge-verify::vetter`, ADR 0009)
+aplica a mesma máquina a uma skill e decide `Vet`/`Block` de forma dura
+e fail-closed. A fase fecha com self-hosting real (ADR 0010): o job
+`verify` do CI roda `forge verify` sobre o próprio workspace e falha o
+build em veredito `Fail`.
 
 **Fase 4 — squad multi-agente + gRPC bidirecional (ADRs 0004–0007):** o
 sidecar Python `forge_squad` roda o `UnifiedOrchestrator` (5 agentes
@@ -86,4 +104,6 @@ painel local em `127.0.0.1`.
 
 - Código e comentários em português (padrão do projeto); identificadores em inglês.
 - Testes unitários junto do módulo (Rust `#[cfg(test)]`; Python `tests/` por pacote).
-- CI em `.github/workflows/ci.yml`: cargo test/clippy/fmt + pytest + gitleaks (bloqueante).
+- CI em `.github/workflows/ci.yml`: cargo test/clippy/fmt + pytest + gitleaks
+  (bloqueante) + cargo-deny + job `verify` (self-hosting: `forge verify` sobre
+  o próprio workspace, Fase 5 Onda 6).

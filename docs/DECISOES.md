@@ -692,3 +692,77 @@ stream → `Failed` → fallback. Sem essa correção o critério de aceite do
 zero falhas. clippy/fmt limpos. **Fase 4 concluída** — o gRPC bidirecional
 tonic × grpc-python sobre UDS deixou de ser a aposta mais arriscada do
 plano e virou fato testado de ponta a ponta.
+
+## Fase 5 — verificação, review e governança, 6 ondas (2026-07-05/06)
+
+Resumo consolidado; cada onda teve seu próprio ciclo commit→PR→merge com
+verificação independente antes de avançar (ADRs 0008–0010 têm o detalhe
+de contrato de cada decisão não-óbvia).
+
+- **Onda 1 — `/verify` determinístico completo**: reescrita de
+  `crates/forge-verify` com timeout real por passo e kill de **grupo** de
+  processos (`process_group(0)` + `libc::kill(-pid, SIGKILL)` — a mesma
+  lição da Fase 4d aplicada aqui, provada com `pgrep` confirmando ausência
+  de processo órfão), parsers para `cargo test`/clippy JSON/ruff JSON
+  construídos contra saída real capturada (não schema adivinhado),
+  `forge.toml` configurável com fallback para `default_steps()`, e um
+  teste golden que valida uma `VerificationEvidence` real (com findings
+  preenchidos) contra `verification-evidence.v1.schema.json`, incluindo
+  caso negativo.
+- **Onda 2 — `forge verify` no CLI**: comando real (`--config/--out/
+  --format`) que roda o pipeline, grava a evidência em
+  `.forge/evidence/<run_id>.json` e sai com `process::exit(1)` em
+  veredito `Fail` — o gate central que as ondas seguintes (e a Onda 6)
+  consomem. 6 testes cross-process reais contra o binário compilado.
+- **Onda 3 — auditor consome evidência real (ADR 0008)**: `SquadTask`
+  ganha `verification_evidence_json` (campo proto aditivo); `forge squad`
+  roda `/verify` antes de cada tarefa e anexa a evidência; `server.py`
+  distingue explicitamente "ausente/inválida" de "válida" (a armadilha do
+  default silencioso de proto3 que já mordeu em `Consensus.requires_human`
+  na Fase 4c); o orquestrador reprova automaticamente **sem chamar o
+  gateway** quando a evidência falta — fail-closed provado por contagem
+  de chamadas ao LLM, não só por valor de saída.
+- **Onda 4 — `forge_review` + gates + certificação**: quatro reviewers
+  ponderam um `value_score`, mas `gates.evaluate` sobrepõe essa média com
+  regras duras (finding crítico, veredito `Fail`, piso de segurança) que
+  nenhuma média alta salva — provado com médias altas (~0.9) e uma
+  condição de gate simultânea. `certification.certify` produz o artefato
+  com o hash da evidência, reusando `canonical_json`/sha256 do
+  `prompt-cache-key` (não uma segunda implementação de hash); o
+  `LedgerStore` já registra esse payload livremente, cadeia íntegra.
+  Desvio registrado: `.buildtovalue/review/orchestrator.py` (fonte de
+  porte prevista) não estava disponível neste ambiente — os reviewers
+  technical/security são código novo, documentado como tal, sem fabricar
+  heurísticas de performance/value por falta de sinal determinístico.
+- **Onda 5 — skill-vetter (ADR 0009)**: `forge-verify::vetter` aponta a
+  mesma máquina de evidência para o diretório de uma skill (manifesto
+  mínimo `skill.toml`), soma checagens de padrão de comando perigoso e de
+  permissão declarada incoerente com sinais de uso no código, e decide
+  `Vet`/`Block` de forma dura — qualquer finding crítico ou veredito
+  `Fail` bloqueia, testado com uma skill boa e uma maliciosa (≥2
+  findings). Fail-closed explícito: manifesto ausente/inválido bloqueia
+  sempre. Decisão registrada: o vetter reimplementa a regra de gate da
+  Onda 4 em Rust puro em vez de importar `forge_review` (Python), para
+  não puxar uma dependência Python num crate que é motor determinístico
+  puro.
+- **Onda 6 — self-hosting no CI + fixtures golden + reconciliação (ADR
+  0010)**: job `verify` novo em `.github/workflows/ci.yml` (separado do
+  job `rust` de propósito — não arrisca o gate que já funciona) roda
+  `forge verify` sobre o próprio workspace e anexa a evidência como
+  artefato do run; o exit code do `forge verify` já é o gate — nenhum
+  encanamento de status check adicional foi necessário. Provado
+  localmente, não só declarado: `forge verify` sobre o workspace real deu
+  `verdict: pass`/exit 0 (~32s); um teste quebrado propositalmente
+  (inserido e revertido na mesma sessão) fez o veredito virar `fail` e o
+  exit code virar 1. Fixtures golden novas para os 4 schemas que ainda
+  não tinham (`handoff-event`, `ledger-entry`, `telemetry-event`,
+  `prompt-template`), cada uma com caso inválido — `prompt-template`
+  registrado honestamente como schema sem tipo Rust/Python associado
+  ainda (só protegido contra drift de sintaxe, não paridade de tipo).
+
+145 testes Rust + 135 Python, zero falhas, clippy/fmt limpos.
+**Fase 5 concluída** — a cobrança de evidência que dependia de disciplina
+manual (a verificação onda a onda desta própria conversa) passa a morar
+estruturalmente no pipeline: `/verify` gera, o squad e o review a
+consomem, o vetter a aplica a skills, e o CI a exige da própria
+plataforma.

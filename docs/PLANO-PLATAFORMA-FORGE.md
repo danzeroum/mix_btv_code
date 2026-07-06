@@ -216,11 +216,11 @@ como arquivos separados mas sem chamador real (ver ADR 0004).
 | Keys de API vazarem | Keys só no processo Rust; Python conhece só o UDS (princípio do proxy do prompte) |
 | Segurança de bash/skills de terceiros | Permissões no core Rust (não contornáveis), skill-vetter bloqueante, sandbox Docker, gitleaks |
 
-## Estado atual (Fases 1–4 concluídas; Fase 5 não iniciada)
+## Estado atual (Fases 1–5 concluídas; Fase 6 não iniciada)
 
 Histórico completo, decisão a decisão, em `docs/DECISOES.md`. Resumo do que já
-compila e está testado no workspace (raiz deste repositório): 104 testes Rust +
-112 Python, clippy `-D warnings` e rustfmt limpos.
+compila e está testado no workspace (raiz deste repositório): 145 testes Rust +
+135 Python, clippy `-D warnings` e rustfmt limpos.
 
 - **Fase 1 — fundação executável**: gateway LLM real com streaming SSE
   (Anthropic/OpenAI/DeepSeek, fallback automático), cache de prompt por hash
@@ -247,8 +247,48 @@ compila e está testado no workspace (raiz deste repositório): 104 testes Rust 
   ao vivo, grava o consenso no ledger e degrada em 3 níveis (squad →
   agente-único → safe-mode). Provado por testes cross-process reais
   (`squad_e2e.rs` + `kill -9`).
+- **Fase 5 — verificação, review e governança (ADRs 0008–0010), 6 ondas**:
+  `/verify` (`crates/forge-verify`) roda um pipeline configurável
+  (`forge.toml`, com fallback para `default_steps()` que espelha o CI) de
+  passos com timeout e kill de *grupo* de processos (não só do processo
+  direto — testado com `pgrep` provando ausência de órfão), parsers reais
+  para `cargo test`/clippy/ruff (construídos contra saída real capturada,
+  não schema adivinhado), produzindo `verification-evidence.v1` validado
+  contra o JSON Schema com um caso negativo (documento quebrado precisa
+  reprovar). `forge verify` (CLI) grava a evidência em disco e sai com
+  código ≠0 em veredito `Fail` — o gate central da fase. O squad
+  (`forge squad`) roda `/verify` antes de cada tarefa e anexa a evidência
+  ao `SquadTask.verification_evidence_json` (ADR 0008); o auditor Python
+  julga sobre ela e reprova automaticamente, **sem chamar o gateway
+  LLM**, quando a evidência está ausente/inválida — fail-closed provado
+  por contagem de chamadas, não só por valor de saída. `forge_review`
+  (Python) pondera quatro reviewers num `value_score`, mas
+  `gates.evaluate` sobrepõe essa média com regras duras — finding
+  crítico, veredito `Fail`, piso de segurança — que nenhuma média alta
+  "salva" (provado com médias altas + condição de gate simultâneas);
+  `certification.certify` produz o artefato com o hash da evidência
+  (reusa `canonical_json`/sha256 do `prompt-cache-key`, não uma segunda
+  implementação), que o `LedgerStore` já registra livremente, cadeia
+  íntegra. O skill-vetter (`forge-verify::vetter`, ADR 0009) aplica a
+  mesma máquina de evidência ao diretório de uma skill (manifesto
+  `skill.toml`), soma checagens de padrão perigoso e de permissão
+  declarada incoerente com o uso, e decide `Vet`/`Block` de forma dura e
+  fail-closed (manifesto ausente/inválido nunca "vet por default"). A
+  fase fecha com o self-hosting literal (ADR 0010): job `verify` no CI
+  roda `forge verify` sobre o próprio workspace e falha o build no
+  veredito `Fail` — provado localmente com um teste quebrado
+  propositalmente (revertido em seguida) que fez o exit code virar 1.
+  Fixtures golden novas para os schemas que ainda não tinham
+  (`handoff-event`, `ledger-entry`, `telemetry-event`, `prompt-template`),
+  cada uma com um caso inválido para não passar por schema permissivo
+  demais.
 - **Contratos**: 4 protos gRPC ativos, 6 JSON Schemas versionados e
-  fixtures de paridade do hash de cache validadas pelos dois lados.
+  fixtures golden validadas — `prompt-cache-key` e `verification-evidence`
+  com paridade cross-language real (Rust × Python); os demais com
+  round-trip schema↔tipo Rust (não há consumidor Python desses eventos
+  hoje); `prompt-template` sem tipo em nenhum lado ainda (só o schema é
+  guardado contra drift de sintaxe) — registrado honestamente, não
+  escondido atrás de "fixtures para todos os schemas".
 - **"Nada Fake" aplicado onda a onda**: a inspeção do BuildToValue
   encontrou fabricação escondida atrás de defaults em cada camada
   (`create_plan`/`_decompose_task` com constantes, o veredito do auditor
@@ -259,14 +299,15 @@ compila e está testado no workspace (raiz deste repositório): 104 testes Rust 
   do código (`AgentOrchestrator`/`SafeAgentBase`/`SquadOrchestrator`/
   `continuous_eval.py`/`adaptive_replanner.py`/`hierarchical_planner.py`,
   ADR 0004).
-- **Operação**: justfile, CI GitHub Actions (cargo/pytest/gitleaks
-  bloqueante), ADRs 0001–0007, script de regeneração de fixtures.
+- **Operação**: justfile, CI GitHub Actions (cargo/pytest/gitleaks/
+  cargo-deny bloqueantes + job `verify` de self-hosting, Onda 6),
+  ADRs 0001–0010, script de regeneração de fixtures.
 
-**Próximo marco: Fase 5 — verificação, review e governança.** `/verify`
-completo com evidência `verification-evidence.v1`, auditor consumindo
-evidência determinística real, skill-vetter, `forge_review` + quality
-gates + certificação, self-hosting (a plataforma passa no próprio
-`/verify`).
+**Próximo marco: Fase 6 — ecossistema e escala.** LSP/MCP, plugins de
+terceiros com sandbox Docker, RAG, A/B testing, testes de carga k6. O
+skill-vetter (Fase 5 Onda 5) já existe como mecanismo — a Fase 6 é quem
+constrói o runtime de carregar/executar skills de terceiros por cima
+dele.
 
 **Pendência de exercício da Fase 4** (código pronto e testado por unit;
 falta só rodar com API real): o registro do consenso no ledger

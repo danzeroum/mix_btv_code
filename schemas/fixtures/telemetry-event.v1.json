@@ -1,0 +1,14 @@
+{
+  "$comment": "Fixture golden do contrato telemetry-event.v1. Valida contra schemas/json/telemetry-event.v1.schema.json e desserializa em forge_schemas::telemetry::TelemetryEvent (Rust, tests/schema_fixtures.rs) — só há tipo do lado Rust hoje; forge-server agrega estes eventos direto do SQLite.",
+  "valid": {
+    "name": "llm.call",
+    "session_id": "session-1",
+    "props": { "model": "claude-sonnet-5", "cache_hit": false },
+    "ts": "2026-07-06T00:00:00Z"
+  },
+  "invalid_missing_name": {
+    "session_id": "session-1",
+    "props": {},
+    "ts": "2026-07-06T00:00:00Z"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "$comment": "Fixture golden do contrato handoff-event.v1. Valida contra schemas/json/handoff-event.v1.schema.json e desserializa em forge_schemas::handoff::HandoffEvent (Rust, tests/schema_fixtures.rs) — só há tipo do lado Rust hoje; nenhum consumidor Python parseia este evento como objeto estruturado.",
+  "valid": {
+    "event": "complete",
+    "task_id": "task-1",
+    "from_agent": "architect",
+    "to_agent": "developer",
+    "contract": "plan.v1",
+    "payload_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ts": "2026-07-06T00:00:00Z"
+  },
+  "invalid_missing_ts": {
+    "event": "complete",
+    "task_id": "task-1",
+    "from_agent": "architect",
+    "to_agent": "developer",
+    "contract": "plan.v1",
+    "payload_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

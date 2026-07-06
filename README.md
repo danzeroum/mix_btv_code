@@ -97,5 +97,29 @@ do auditor por fórmula, o evaluator com `technical_score` fixo, a aprovação
 HITL sempre `true`), a versão portada deriva tudo de raciocínio real do
 modelo, com fallback honesto quando o parsing falha.
 
-Próximo marco: Fase 5 (verificação, review e governança — `/verify` com
-evidência JSON, `forge_review` com quality gates, self-hosting).
+**Fase 5 concluída** — verificação, review e governança, em 6 ondas
+(ADRs 0008–0010). `/verify` (`crates/forge-verify`) roda um pipeline
+configurável (`forge.toml`) de passos com timeout e kill de grupo de
+processos, parsers reais para `cargo test`/clippy/ruff, e produz
+`verification-evidence.v1`; `forge verify` grava a evidência em disco e
+sai com código ≠0 em veredito `Fail` — o gate que o CI (job `verify`,
+Onda 6) e o squad (Onda 3) consomem. O squad passa a rodar `/verify`
+antes de cada tarefa e anexa a evidência ao `SquadTask`
+(`verification_evidence_json`, ADR 0008); o auditor Python julga sobre
+ela e reprova automaticamente — sem chamar o LLM — quando a evidência
+está ausente ou inválida (fail-closed, provado por contagem de chamadas
+ao gateway). `forge_review` (Python) pondera quatro reviewers num
+`value_score`, mas `gates.evaluate` sobrepõe essa média com regras duras
+— finding crítico, veredito `Fail`, piso de segurança — que nenhuma média
+alta "salva"; `certification.certify` produz o artefato com o hash da
+evidência (mesmo `canonical_json`/sha256 do `prompt-cache-key`), que o
+ledger já registra livremente. O skill-vetter (`forge-verify::vetter`,
+ADR 0009) aplica a mesma máquina de evidência ao diretório de uma skill e
+decide `Vet`/`Block` de forma dura e fail-closed. A fase fecha com o
+self-hosting literal: um job de CI roda `forge verify` sobre o próprio
+workspace e falha o build no veredito `Fail` (provado com um teste
+quebrado propositalmente e revertido) — a cobrança de evidência que era
+manual nesta fase passa a morar no pipeline.
+
+Próximo marco: Fase 6 (LSP/MCP, plugins de terceiros com sandbox, RAG,
+A/B testing, k6).
