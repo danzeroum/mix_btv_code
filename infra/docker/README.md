@@ -103,6 +103,21 @@ http://127.0.0.1:7878
 **Nunca** publique a porta direto (`-p 7878:7878` + firewall aberto) — o
 dashboard não foi projetado nem testado para acesso público na internet.
 
+## `forge verify` dentro do container
+
+A imagem carrega o toolchain Rust completo (cargo/rustc/clippy/rustfmt) no
+runtime, especificamente para `forge verify` funcionar — os `default_steps()`
+dele rodam `cargo test/clippy/fmt` de verdade contra o que estiver montado em
+`/work`. Isso deixa a imagem maior (~1-2GB a mais) de propósito; sem isso, os
+três passos falhariam com "No such file or directory" (o binário `cargo`
+simplesmente não existiria no runtime).
+
+**Primeira execução é mais lenta**: como `/work` é o seu projeto montado (bind
+mount), o `target/` que o `cargo test` gera fica no **host**, não só no
+container — então a primeira `forge verify` compila do zero (alguns minutos,
+dependendo da VPS), mas as próximas reaproveitam esse cache e são bem mais
+rápidas, mesmo depois de `--rm` no container.
+
 ## As 4 pegadinhas de container (o que muda vs. rodar na máquina)
 
 1. **`FORGE_PYTHON_DIR` é obrigatório** — e a imagem já o define

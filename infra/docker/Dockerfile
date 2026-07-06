@@ -27,6 +27,11 @@ WORKDIR /src
 # o build NÃO precisa de protobuf-compiler / libssl-dev / libsqlite3-dev.
 COPY . .
 RUN cargo build --release -p forge-cli
+# clippy/rustfmt não vêm no profile default do rustup — `forge verify` (os
+# default_steps: cargo test/clippy/fmt) precisa deles no RUNTIME também, senão
+# falha com "No such file or directory" (o binário não existe, não é bug do
+# Forge). Adiciona aqui pra copiar o toolchain inteiro abaixo.
+RUN rustup component add clippy rustfmt
 
 # ---------- build (frontend do dashboard) ----------
 # web/dist NÃO é commitado (web/.gitignore) — precisa ser buildado. Sem este
@@ -44,12 +49,23 @@ RUN pnpm build
 # ---------- runtime ----------
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git \
+ && apt-get install -y --no-install-recommends ca-certificates curl git gcc \
  && rm -rf /var/lib/apt/lists/*
 
 # uv: o sidecar (squad/promptforge) é spawnado pelo processo Rust via `uv run`.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
+
+# Toolchain Rust completo (cargo/rustc/clippy/rustfmt), copiado do estágio de
+# build — é o que permite `forge verify` (cargo test/clippy/fmt) rodar de
+# verdade dentro do container. A imagem oficial `rust:*` instala em
+# /usr/local/cargo e /usr/local/rustup por convenção; `gcc` (acima) é o linker
+# que `cargo build`/`test` chamam via `cc`.
+COPY --from=build /usr/local/cargo /usr/local/cargo
+COPY --from=build /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH="/usr/local/cargo/bin:${PATH}"
 
 WORKDIR /app
 COPY --from=build /src/target/release/forge /usr/local/bin/forge
