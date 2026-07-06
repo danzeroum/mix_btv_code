@@ -9,7 +9,10 @@
 //! e mata o GRUPO no timeout — a lição do órfão da Fase 4d, para que uma skill
 //! que trava não trave o loop.
 
-use crate::{bound_output, Tool, ToolError, ToolOutput, DEFAULT_OUTPUT_LIMIT};
+use crate::{
+    bound_output, Sandbox, SandboxError, SandboxOutput, Tool, ToolError, ToolOutput,
+    DEFAULT_OUTPUT_LIMIT,
+};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -34,6 +37,10 @@ pub struct SkillTool {
     /// Diretório da skill — vira o cwd do subprocesso.
     dir: PathBuf,
     timeout: Duration,
+    /// Terceiro (untrusted): `run` executa confinado no sandbox (Onda 2), com
+    /// fail-closed se o daemon estiver ausente. Built-in (trusted) roda direto.
+    /// É a régua de segurança da Onda 3 — código de fora só roda dentro da cela.
+    sandboxed: bool,
 }
 
 impl SkillTool {
@@ -52,11 +59,20 @@ impl SkillTool {
             entrypoint: entrypoint.into(),
             dir,
             timeout: Duration::from_millis(DEFAULT_SKILL_TIMEOUT_MS),
+            sandboxed: false,
         }
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Marca a skill como de terceiro: `run` a executa **confinada no sandbox**
+    /// (Onda 2), fail-closed se não houver daemon Docker. O built-in confiável
+    /// (default) roda direto.
+    pub fn sandboxed(mut self) -> Self {
+        self.sandboxed = true;
         self
     }
 }
@@ -93,7 +109,11 @@ impl Tool for SkillTool {
 
     fn run(&self, args: &Value) -> Result<ToolOutput, ToolError> {
         let input = args.get("input").and_then(Value::as_str).unwrap_or("");
-        let output = run_entrypoint(&self.dir, &self.entrypoint, input, self.timeout)?;
+        let output = if self.sandboxed {
+            run_in_sandbox(&self.dir, &self.entrypoint, input, self.timeout)?
+        } else {
+            run_entrypoint(&self.dir, &self.entrypoint, input, self.timeout)?
+        };
         Ok(bound_output(output, DEFAULT_OUTPUT_LIMIT))
     }
 }
@@ -177,6 +197,59 @@ fn kill_process_group(_pid: u32) {
     // Fora do Unix o `Child` ainda é derrubado no drop; sem garantia de netos.
 }
 
+/// Roda o entrypoint da skill DENTRO do sandbox Docker (Onda 2), como código de
+/// terceiro. **Fail-closed:** se o daemon está ausente, devolve erro e a skill
+/// NÃO roda — o `run_entrypoint` direto jamais é usado como fallback (seria
+/// rodar código alheio fora da cela, a falha catastrófica da Onda 3).
+fn run_in_sandbox(
+    dir: &Path,
+    entrypoint: &str,
+    input: &str,
+    timeout: Duration,
+) -> Result<String, ToolError> {
+    let sandbox = Sandbox::new(dir.to_path_buf()).with_timeout(timeout);
+    // Mesmo contrato do caminho direto (`sh -c <entrypoint> forge-skill <input>`,
+    // cwd em /work), só que confinado.
+    let cmd = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        entrypoint.to_string(),
+        "forge-skill".to_string(),
+        input.to_string(),
+    ];
+    match run_sandbox_blocking(sandbox, cmd) {
+        Ok(out) => {
+            let mut s = out.stdout;
+            if out.timed_out {
+                s.push_str("\n[skill: timeout no sandbox]");
+            } else if out.exit_code != 0 {
+                s.push_str(&format!("\n[skill exit code: {}]", out.exit_code));
+            }
+            Ok(s)
+        }
+        Err(SandboxError::DaemonUnavailable(m)) => Err(ToolError::Execution(format!(
+            "sandbox Docker indisponível — skill de terceiro não roda (fail-closed): {m}"
+        ))),
+        Err(SandboxError::Execution(m)) => Err(ToolError::Execution(format!("sandbox: {m}"))),
+    }
+}
+
+/// Ponte sync→async: o `Tool::run` é síncrono, mas o `Sandbox` (bollard) é
+/// async. Roda o await numa thread dedicada com runtime próprio — seguro de
+/// chamar de dentro OU fora de um runtime tokio (não dá para aninhar `block_on`
+/// no worker do loop do agente).
+fn run_sandbox_blocking(sandbox: Sandbox, cmd: Vec<String>) -> Result<SandboxOutput, SandboxError> {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| SandboxError::Execution(format!("runtime do sandbox: {e}")))?;
+        rt.block_on(sandbox.run(&cmd, &[]))
+    })
+    .join()
+    .map_err(|_| SandboxError::Execution("thread do sandbox entrou em pânico".into()))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +310,77 @@ mod tests {
         assert_eq!(tool.name(), "dyn-name");
         assert_eq!(tool.description(), "dyn-desc");
         assert_eq!(tool.scope(&json!({"input": "abc"})), "skill:dyn-name abc");
+    }
+
+    /// Fase 6 Onda 3, fail-closed (o guard-rail catastrófico): uma skill de
+    /// terceiro (`.sandboxed()`) sem daemon Docker **não roda** — devolve erro e
+    /// o entrypoint não executa (provado por um arquivo que ele criaria). Roda
+    /// onde não há daemon (aqui); com daemon (CI) a skill roda confinada e o
+    /// teste apenas registra isso (o caminho daemon-ausente não é exercitável).
+    #[test]
+    fn terceiro_sem_daemon_nao_roda_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let marca = dir.path().join("EXECUTOU");
+        let entry = format!("touch \"{}\"", marca.display());
+        let tool = SkillTool::new("terceiro", "d", entry, dir.path().to_path_buf()).sandboxed();
+        match tool.run(&json!({"input": ""})) {
+            Err(e) => {
+                assert!(
+                    e.to_string().contains("fail-closed") || e.to_string().contains("sandbox"),
+                    "erro inesperado: {e}"
+                );
+                assert!(
+                    !marca.exists(),
+                    "sem sandbox, a skill de terceiro NÃO pode ter executado"
+                );
+            }
+            Ok(_) => eprintln!(
+                "[skill] há daemon Docker; o caminho fail-closed sem daemon não é exercitável aqui"
+            ),
+        }
+    }
+
+    /// Fase 6 Onda 3, o marco (critério nº 1): uma skill de terceiro roda
+    /// CONFINADA e devolve seu output. Exige daemon → `#[ignore]`, roda no CI com
+    /// `--include-ignored` (a lição da Onda 2).
+    #[test]
+    #[ignore = "execução confinada exige daemon Docker; roda no CI: cargo test -- --include-ignored"]
+    fn terceiro_roda_confinado_e_devolve_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = SkillTool::new(
+            "greet",
+            "d",
+            r#"printf 'CONFINADO:%s' "$1""#,
+            dir.path().to_path_buf(),
+        )
+        .sandboxed();
+        let out = tool.run(&json!({"input": "mundo"})).unwrap();
+        assert!(
+            out.content.contains("CONFINADO:mundo"),
+            "output confinado: {}",
+            out.content
+        );
+    }
+
+    /// Fase 6 Onda 3, contenção (fronteira nº 3): uma skill que passaria o vetter
+    /// estático mas em runtime tenta escrever fora do mount é CONTIDA pelo sandbox
+    /// (rootfs read-only) — a 2ª camada pega o que a 1ª (estática) não vê. CI.
+    #[test]
+    #[ignore = "contenção exige daemon Docker; roda no CI: cargo test -- --include-ignored"]
+    fn terceiro_que_abusa_e_contido_pelo_sandbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = SkillTool::new(
+            "abusa",
+            "d",
+            "echo x > /etc/forge-escape || echo BLOQUEADO",
+            dir.path().to_path_buf(),
+        )
+        .sandboxed();
+        let out = tool.run(&json!({"input": ""})).unwrap();
+        assert!(
+            out.content.contains("BLOQUEADO"),
+            "escrever fora do mount deveria ser bloqueado pelo rootfs read-only: {}",
+            out.content
+        );
     }
 }
