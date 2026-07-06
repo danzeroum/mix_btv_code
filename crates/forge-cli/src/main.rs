@@ -21,6 +21,7 @@ use forge_core::{
 };
 use forge_llm::chat::ChatMessage;
 use forge_llm::{tier_from_id, Gateway, Generator, ModelTier, RateLimiter};
+use forge_schemas::experiment::{ExperimentReport, VariantStats};
 use forge_store::{EventStore, PromptCache, Telemetry};
 use forge_tools::ToolRegistry;
 use rate_limit_gen::RateLimitedGenerator;
@@ -113,6 +114,20 @@ enum Commands {
         #[arg(long, default_value_t = 7878)]
         port: u16,
     },
+    /// Gera o relatório de A/B testing de um experimento a partir da telemetria
+    /// local: compara a taxa de sucesso das duas variantes com teste de
+    /// significância. Sem diferença real → "sem significância", nunca um
+    /// vencedor fabricado (a régua Nada Fake aplicada a estatística).
+    Experiment {
+        /// Nome do experimento (`props.experiment` na telemetria).
+        experiment: String,
+        /// Banco de telemetria (default: `.forge/telemetry.db`).
+        #[arg(long)]
+        db: Option<PathBuf>,
+        /// Formato da saída.
+        #[arg(long, value_enum, default_value = "human")]
+        format: VerifyFormat,
+    },
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -149,6 +164,71 @@ async fn main() -> Result<()> {
             squad::run_squad(generator, &opts, &root, task).await
         }
         Commands::Dashboard { port } => run_dashboard(port).await,
+        Commands::Experiment {
+            experiment,
+            db,
+            format,
+        } => run_experiment(experiment, db, format),
+    }
+}
+
+/// Gera o relatório de A/B de um experimento a partir da telemetria local
+/// (`.forge/telemetry.db`). Exige exatamente 2 variantes (o A/B é entre duas);
+/// o veredito de significância é derivado dos dados — nunca inventa vencedor.
+fn run_experiment(experiment: String, db: Option<PathBuf>, format: VerifyFormat) -> Result<()> {
+    let root = std::env::current_dir().context("diretório atual")?;
+    let db_path = db.unwrap_or_else(|| root.join(".forge").join("telemetry.db"));
+    let telemetry = Telemetry::open(db_path.to_str().unwrap_or(".forge/telemetry.db"))?;
+
+    let variants = telemetry.experiment_variants(&experiment);
+    if variants.len() != 2 {
+        bail!(
+            "A/B exige exatamente 2 variantes; o experimento '{experiment}' tem {} \
+             (procuro eventos com props.experiment='{experiment}' e props.variant na telemetria)",
+            variants.len()
+        );
+    }
+    let a = VariantStats::new(variants[0].0.clone(), variants[0].1, variants[0].2);
+    let b = VariantStats::new(variants[1].0.clone(), variants[1].1, variants[1].2);
+    let report =
+        ExperimentReport::from_two_variants(experiment, "success_rate", a, b, now_rfc3339());
+
+    match format {
+        VerifyFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        VerifyFormat::Human => print_experiment_human(&report),
+    }
+    Ok(())
+}
+
+fn print_experiment_human(report: &ExperimentReport) {
+    use forge_schemas::experiment::{ExperimentVerdict, MIN_SAMPLES};
+    println!(
+        "Experimento: {}  (métrica: {})",
+        report.experiment, report.metric
+    );
+    for v in &report.variants {
+        println!(
+            "  {}: {}/{} sucessos = {:.1}%",
+            v.variant,
+            v.successes,
+            v.n,
+            v.rate * 100.0
+        );
+    }
+    match report.verdict {
+        ExperimentVerdict::Significant => println!(
+            "Veredito: VENCEDOR {} (p = {:.4} < {ALPHA}) — diferença significativa",
+            report.winner.as_deref().unwrap_or("?"),
+            report.p_value,
+            ALPHA = forge_schemas::experiment::ALPHA,
+        ),
+        ExperimentVerdict::Inconclusive => println!(
+            "Veredito: SEM SIGNIFICÂNCIA (p = {:.4}) — sem vencedor",
+            report.p_value
+        ),
+        ExperimentVerdict::InsufficientData => {
+            println!("Veredito: DADOS INSUFICIENTES — mínimo de {MIN_SAMPLES} eventos por variante")
+        }
     }
 }
 

@@ -107,6 +107,36 @@ impl TelemetryStore {
             cache_hit_rate,
         })
     }
+
+    /// Agrega os eventos de um experimento A/B por variante (Fase 6 Onda 7):
+    /// devolve `(variante, n, sucessos)` por variante. Um evento pertence ao
+    /// experimento se `props.experiment` bate; é atribuído por `props.variant`;
+    /// conta como sucesso se `props.success` é verdadeiro (JSON `true`/`1`).
+    /// Usa a extensão JSON1 do SQLite (bundled) — `summary` só agrupa por nome,
+    /// isto é a consulta nova que o A/B exige.
+    pub fn experiment_variants(
+        &self,
+        experiment: &str,
+    ) -> rusqlite::Result<Vec<(String, u64, u64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT json_extract(props, '$.variant') AS variant,
+                    COUNT(*) AS n,
+                    SUM(CASE WHEN json_extract(props, '$.success') = 1 THEN 1 ELSE 0 END) AS successes
+             FROM telemetry_event
+             WHERE json_extract(props, '$.experiment') = ?1
+               AND json_extract(props, '$.variant') IS NOT NULL
+             GROUP BY variant
+             ORDER BY variant",
+        )?;
+        let rows = stmt.query_map(params![experiment], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, u64>(2)?,
+            ))
+        })?;
+        rows.collect()
+    }
 }
 
 /// Handle cloneável e thread-safe sobre um [`TelemetryStore`] — decoradores
@@ -156,6 +186,16 @@ impl Telemetry {
             .summary()
             .unwrap_or_default()
     }
+
+    /// `(variante, n, sucessos)` por variante do experimento (Fase 6 Onda 7).
+    /// Vazio em falha — como o resto do handle, telemetria não quebra o caminho.
+    pub fn experiment_variants(&self, experiment: &str) -> Vec<(String, u64, u64)> {
+        self.0
+            .lock()
+            .expect("telemetry mutex poisoned")
+            .experiment_variants(experiment)
+            .unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -196,6 +236,48 @@ mod tests {
         let store = TelemetryStore::open_in_memory().unwrap();
         store.record("tool.run", "s1", &json!({}), "t").unwrap();
         assert_eq!(store.summary().unwrap().cache_hit_rate, None);
+    }
+
+    #[test]
+    fn experiment_variants_agrega_por_variante_e_conta_sucessos() {
+        let store = TelemetryStore::open_in_memory().unwrap();
+        // Experimento "x": variante A com 2 sucessos em 3; B com 0 em 2.
+        for success in [true, true, false] {
+            store
+                .record(
+                    "llm.call",
+                    "s",
+                    &json!({"experiment": "x", "variant": "A", "success": success}),
+                    "t",
+                )
+                .unwrap();
+        }
+        for _ in 0..2 {
+            store
+                .record(
+                    "llm.call",
+                    "s",
+                    &json!({"experiment": "x", "variant": "B", "success": false}),
+                    "t",
+                )
+                .unwrap();
+        }
+        // Ruído: outro experimento e um evento sem variante — não devem contar.
+        store
+            .record(
+                "llm.call",
+                "s",
+                &json!({"experiment": "outro", "variant": "A", "success": true}),
+                "t",
+            )
+            .unwrap();
+        store.record("cache.hit", "s", &json!({}), "t").unwrap();
+
+        let variants = store.experiment_variants("x").unwrap();
+        assert_eq!(
+            variants,
+            vec![("A".to_string(), 3, 2), ("B".to_string(), 2, 0),]
+        );
     }
 
     #[test]

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.buildtovalue.dev/schemas/experiment.v1.schema.json",
+  "title": "experiment.v1",
+  "description": "Relatório de A/B testing sobre a telemetria (Fase 6 Onda 7). Compara a taxa de sucesso de duas variantes com um teste z de duas proporções; o veredito é derivado dos dados (significant/inconclusive/insufficient_data) e o vencedor só existe quando há significância — nunca fabricado.",
+  "type": "object",
+  "required": ["experiment", "metric", "variants", "verdict", "p_value", "produced_at"],
+  "properties": {
+    "experiment": { "type": "string" },
+    "metric": { "type": "string", "examples": ["success_rate"] },
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["variant", "n", "successes", "rate"],
+        "properties": {
+          "variant": { "type": "string" },
+          "n": { "type": "integer", "minimum": 0 },
+          "successes": { "type": "integer", "minimum": 0 },
+          "rate": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "verdict": { "type": "string", "enum": ["significant", "inconclusive", "insufficient_data"] },
+    "winner": { "type": "string" },
+    "p_value": { "type": "number", "minimum": 0, "maximum": 1 },
+    "produced_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -5,6 +5,7 @@
 //! permanecer compatíveis com esses arquivos (testes de contrato garantem).
 
 pub mod canonical;
+pub mod experiment;
 pub mod handoff;
 pub mod ledger;
 pub mod telemetry;

@@ -18,6 +18,7 @@
 //! schema) — sem o negativo, o positivo pode estar passando por schema
 //! vazio/permissivo demais (a lição da Onda 1).
 
+use forge_schemas::experiment::ExperimentReport;
 use forge_schemas::handoff::HandoffEvent;
 use forge_schemas::ledger::LedgerEntry;
 use forge_schemas::telemetry::TelemetryEvent;
@@ -102,6 +103,28 @@ fn telemetry_event_fixture_valida_e_desserializa() {
     assert!(
         !validator.is_valid(&doc["invalid_missing_name"]),
         "documento sem 'name' deveria reprovar o schema"
+    );
+}
+
+#[test]
+fn experiment_fixture_valida_e_desserializa() {
+    let schema = schema("experiment");
+    let doc = fixture("experiment");
+    let validator = validator_for(&schema).expect("schema compila");
+
+    assert!(
+        validator.is_valid(&doc["valid"]),
+        "fixture válida não bateu o schema: {:?}",
+        validator.iter_errors(&doc["valid"]).collect::<Vec<_>>()
+    );
+    let parsed: ExperimentReport =
+        serde_json::from_value(doc["valid"].clone()).expect("desserializa em ExperimentReport");
+    assert_eq!(parsed.experiment, "prompt-tone");
+    assert_eq!(parsed.winner.as_deref(), Some("A"));
+
+    assert!(
+        !validator.is_valid(&doc["invalid_missing_verdict"]),
+        "documento sem 'verdict' deveria reprovar o schema"
     );
 }
 

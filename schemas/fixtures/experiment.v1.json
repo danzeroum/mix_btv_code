@@ -1,0 +1,22 @@
+{
+  "$comment": "Fixture golden do contrato experiment.v1 (A/B testing, Fase 6 Onda 7). Valida contra schemas/json/experiment.v1.schema.json e desserializa em forge_schemas::experiment::ExperimentReport (Rust, tests/schema_fixtures.rs). Tipo só do lado Rust — o relatório é agregação determinística sobre a telemetria SQLite (Rust-owned), sem consumidor Python, então não há paridade cross-language a comparar. O caso valid é um experimento SIGNIFICATIVO (com vencedor); o invalid remove 'verdict' (campo obrigatório).",
+  "valid": {
+    "experiment": "prompt-tone",
+    "metric": "success_rate",
+    "variants": [
+      { "variant": "A", "n": 100, "successes": 90, "rate": 0.9 },
+      { "variant": "B", "n": 100, "successes": 50, "rate": 0.5 }
+    ],
+    "verdict": "significant",
+    "winner": "A",
+    "p_value": 0.0000001,
+    "produced_at": "2026-07-06T00:00:00Z"
+  },
+  "invalid_missing_verdict": {
+    "experiment": "prompt-tone",
+    "metric": "success_rate",
+    "variants": [],
+    "p_value": 0.5,
+    "produced_at": "2026-07-06T00:00:00Z"
+  }
+}

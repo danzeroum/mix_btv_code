@@ -147,3 +147,42 @@
   depende mais dele (lê o JSONL). Não removi o ramo chromadb (é um sink
   alternativo para um futuro vector DB real); documentei que está inativo. Limpeza
   ou fiação a um vector DB de verdade é candidata à Onda 9 ou onda futura.
+
+## Onda 7 — A/B testing via telemetria (critério nº 2)
+
+- **[decisão] O relatório A/B vive no Rust.** É agregação **determinística** sobre
+  a telemetria SQLite (Rust-owned: "storage" é Rust pela ADR 0001), não raciocínio
+  de agente — mesmo tipo de `summary`/`dashboard`/`verify`. O Python nem acessa a
+  telemetria. Novo `forge experiment <nome>` (espelha `dashboard`/`verify`), nova
+  consulta `TelemetryStore::experiment_variants` (`json_extract` da extensão JSON1
+  do SQLite bundled — `summary` só agrupava por nome), e o tipo/estatística em
+  `forge-schemas::experiment`.
+- **[decisão] Atribuição por props, sem mudar o storage.** Um evento entra no
+  experimento com `props.experiment` + `props.variant` + `props.success` (o
+  `record` já aceita `Value` arbitrário — nada a mudar na escrita). A consulta
+  agrupa por variante e conta sucessos via `json_extract(props,'$.success')=1`.
+- **[decisão] Significância hand-rolled (sem crate de estatística).** O workspace
+  não tem `statrs`/`statistical`/`rand_distr` etc. Implementei o **teste z de
+  duas proporções** (variância pooled) com CDF normal via aproximação de `erf`
+  (Abramowitz-Stegun 7.1.26, |erro| ≤ 1.5e-7) em Rust puro (~15 linhas). Suficiente
+  para um p-valor de decisão; precedente de matemática pequena embutida:
+  `cache_hit_rate` e `derive_verdict`. **Nota:** o teste de igualdade de p-valor
+  usa folga 1e-6 (não 1e-9) porque erf(0) da aproximação ≈ 1e-9, não exato.
+- **[decisão] Veredito honesto derivado dos dados (a régua Nada Fake).** Três
+  estados: `Significant` (p<α, **com** vencedor = maior taxa), `Inconclusive`
+  (amostra ok mas p≥α → **sem vencedor**, "sem significância"), `InsufficientData`
+  (< `MIN_SAMPLES`=20 por variante → não conclui). O vencedor **só** existe quando
+  Significant — nunca fabricado. Mesma postura de `verification::derive_verdict`.
+  Provado ponta-a-ponta: seed real de telemetria → `exp-sig` (90%×50%) dá
+  "VENCEDOR A p≈7e-10"; `exp-tie` (50%×52%) dá "SEM SIGNIFICÂNCIA p=0.78".
+- **[decisão] `experiment.v1` é Rust-only (sem paridade Python).** Segue o
+  precedente `telemetry-event.v1`: schema hand-written + tipo `schemars` + fixture
+  golden (valid significativo / invalid sem `verdict`) + teste em
+  `schema_fixtures.rs`. Só `prompt-cache-key.v1` exige dupla implementação
+  (CLAUDE.md), então `gen_fixtures.py` **não** foi tocado. O ADR de schema novo
+  (`experiment.v1`) é formalizado na Onda 9.
+- **[decisão/limite] A/B é entre exatamente DUAS variantes.** `forge experiment`
+  falha (exit≠0, mensagem clara) se o experimento não tem 2 variantes na
+  telemetria. A/B multivariante (>2, com correção de comparações múltiplas) é onda
+  futura. A métrica hoje é `success_rate` (taxa de sucesso binária); outras
+  métricas (latência P95, custo) são extensão futura.
