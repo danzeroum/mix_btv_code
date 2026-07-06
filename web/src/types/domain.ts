@@ -31,15 +31,25 @@ export interface ModelTier {
   label: string
 }
 
+/** Espelha `forge_schemas::ledger::OverrideMark` — override é sempre um
+ * campo de primeira classe na entrada em si, nunca inferido no cliente. */
+export interface LedgerOverrideMark {
+  marked: boolean
+  reason?: string
+}
+
+/** Espelha `forge_schemas::ledger::LedgerEntry` — a resposta de `GET
+ * /api/ledger` é essa struct serializada direto, sem DTO espelho. */
 export interface LedgerEntry {
   seq: number
-  ts: string
+  prev_hash: string
+  entry_hash: string
+  kind: string
   actor: string
-  actorColor: 'ok' | 'wire' | 'py'
-  action: string
-  hashPrev: string
-  hashCurr: string
-  flag?: 'override'
+  payload: unknown
+  override?: LedgerOverrideMark
+  fake_marker?: string
+  ts: string
 }
 
 export interface VerifyStep {

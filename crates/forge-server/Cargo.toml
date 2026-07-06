@@ -30,3 +30,6 @@ path = "src/bin/loadgen.rs"
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
 tempfile.workspace = true
+# Só para montar `LedgerEntry` nos testes (semear o ledger por fora da rota);
+# produção nunca constrói a entrada aqui, só repassa o que `LedgerStore` devolve.
+forge-schemas.workspace = true

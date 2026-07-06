@@ -503,3 +503,80 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   gerador é ambíguo se houver mais de uma entrada salva com o mesmo gerador —
   o botão "fav" por entrada na lista da biblioteca (que já existia, operando
   sobre um id direto) é o único caminho agora, sem ambiguidade.
+
+## Onda 6 — Ledger (leitura paginada + filtro ator)
+
+- **[achado real, corrigido] `LedgerStore::open` não ligava WAL**, ao contrário
+  de `EventStore::open`/`RuleStore::open` (que já ligam). Era um bug de
+  concorrência latente já **nomeado** no próprio código antes desta onda — o
+  comentário de `RuleStore::open` já dizia "ao contrário do `LedgerStore`
+  legado (bug conhecido, fechado só na Onda 6)". CLI (`forge run`/`chat`/
+  `squad`) e o dashboard web tocam `.forge/forge.db` ao mesmo tempo; sem WAL,
+  bastava uma escrita do CLI coincidir com uma leitura do dashboard para dar
+  "database is locked". Corrigido com o mesmo `pragma_update(None,
+  "journal_mode", "WAL")` que os outros dois stores já usam; teste dedicado
+  abre um arquivo real (não `open_in_memory`, que não suporta WAL) e confirma
+  `PRAGMA journal_mode` = `"wal"`.
+- **[decisão] `LedgerStore::recent(limit, actor)` filtra por `actor` dentro do
+  MESMO `WHERE`/`ORDER BY`/`LIMIT` do SQL, não em Rust depois.** `actor` não é
+  coluna própria (mora dentro do `body` JSON), então usei
+  `json_extract(body, '$.actor') = ?2` combinado com `ORDER BY seq DESC LIMIT
+  ?1` numa única query — mesmo padrão de paginação de `TelemetryStore::recent`.
+  Se filtrasse só depois de truncar para as N mais recentes, um ator raro que
+  não estivesse entre as últimas N apareceria como "sem entradas" mesmo tendo
+  histórico de verdade. Teste dedicado prova isso: semeia 1 entrada de um ator
+  raro, depois 5 de outro ator, confirma que um `LIMIT 3` sem filtro NÃO veria
+  o raro, mas o mesmo `LIMIT 3` COM filtro o encontra.
+- **[decisão] `POST /api/ledger/verify` sempre devolve HTTP 200; `ok:false` no
+  corpo sinaliza cadeia corrompida, não um status de erro.** A requisição em
+  si teve sucesso — o que ela relata é que o *dado* está adulterado. Mantém o
+  contrato que o mock antigo já modelava (`{ok, verified}`) e evita que o
+  frontend precise distinguir "erro de rede/servidor" de "corrupção
+  detectada" só pelo status code.
+- **[decisão] `serve_with_agent` (forge-cli/web_agent.rs) ganhou
+  `#[allow(clippy::too_many_arguments)]`.** Já estava em 7 argumentos (limite
+  do clippy); adicionar o handle do ledger foi para 8. É uma função só de
+  encaminhamento (empacota os handles que `main.rs` mantém abertos + compõe os
+  routers) — não tem lógica que uma struct de agrupamento tornaria mais clara,
+  e o padrão do projeto não introduz abstração além do que a tarefa pede. Se
+  mais um handle for somado numa onda futura (ex.: Onda 7 MCP), vale
+  reconsiderar uma struct `DashboardHandles` compartilhada entre
+  `forge-server`/`forge-cli` neste ponto.
+- **[decisão] `LedgerEntry` do frontend (`types/domain.ts`) foi reescrita para
+  o formato real da wire** (`seq, prev_hash, entry_hash, kind, actor, payload,
+  override?, fake_marker?, ts`) — o mock antigo tinha campos fabricados que não
+  existem no backend (`actorColor`, `action`, `hashPrev`/`hashCurr` truncados
+  a 4 chars, `flag`). `actorColor` e o hash truncado para exibição viraram
+  derivações no CLIENTE (`actorColor()`/`shortHash()` em `Ledger.tsx`), nunca
+  campos da wire — `actorColor` é um heurístico por prefixo real de `actor`
+  (`web:*` → override feito pelo navegador, `forge-cli:*` → sessão de CLI/TUI/
+  squad, resto → terceiro tom), não uma cor arbitrária por sessão de teste
+  como o mock antigo tinha.
+- **[decisão] Filtro por ator na tela refaz a busca no backend a cada troca de
+  botão, não corta a lista já carregada no cliente.** Consequência direta do
+  ponto acima sobre `LedgerStore::recent`: se a tela cortasse client-side, o
+  mesmo problema (ator raro fora da janela recente "sumindo") reapareceria na
+  UI mesmo com o backend correto. A lista de botões de ator (`actors`) só é
+  re-derivada da busca SEM filtro, para não perder os outros botões quando um
+  filtro específico está ativo.
+- **[decisão] Banner de integridade não afirma "cadeia íntegra" por padrão —
+  só depois que o usuário clica em "verificar integridade" e a resposta real
+  chega.** O mock antigo mostrava a claim fixa mesmo sem nunca ter chamado
+  `verifyChain()`. Antes do primeiro clique, o banner mostra só a contagem de
+  entradas carregadas + "integridade ainda não verificada nesta sessão" —
+  consistente com a régua "Nada Fake" (não reivindicar um veredito que ainda
+  não rodou).
+- **[nota] Novo exemplo `forge-store/examples/seed_ledger.rs`** (mirror de
+  `seed_telemetry.rs`, já existente) — semeia entradas reais via
+  `LedgerStore::append` para o e2e de integração poder provar a fronteira
+  "tela mostra o que foi gravado por fora do browser" sem SQL cru. Usado por
+  `web/scripts/run-integration-server.mjs` (2 chamadas, formando uma cadeia
+  real de 2 entradas) e pelo novo `ledger-real-backend.spec.ts`.
+- **[decisão] O teste Playwright novo filtra por um ator dedicado
+  (`e2e-ledger-seed`) que nenhum outro spec desta suíte usa.** Squad e
+  permissões também escrevem no MESMO `.forge/forge.db` compartilhado pelo
+  `webServer` único da config de integração (`fullyParallel: false`) — sem um
+  ator exclusivo, a asserção de contagem exata de linhas ficaria dependente da
+  ordem de execução dos arquivos de teste. Com o filtro, a asserção
+  (exatamente 2 linhas, hash/seq batendo) é robusta independente de quantas
+  outras entradas os demais specs acumularem no mesmo arquivo.

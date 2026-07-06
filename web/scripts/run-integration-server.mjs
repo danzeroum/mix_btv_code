@@ -1,8 +1,9 @@
-// Sobe o `forge dashboard` REAL (processo Rust, sqlite de verdade) para o
-// e2e de integração de telemetria em tests/e2e-integration/. Não é vite dev
-// + proxy — é o binário que roda em produção, servindo o build real de
-// web/dist. Semeia um evento via forge-store::Telemetry (o mesmo caminho
-// real que llm.call/tool.result usam), nunca SQL cru.
+// Sobe o `forge dashboard` REAL (processo Rust, sqlite de verdade) para os
+// e2e de integração em tests/e2e-integration/ (telemetria, permissões,
+// squad, ledger). Não é vite dev + proxy — é o binário que roda em
+// produção, servindo o build real de web/dist. Semeia dados via
+// forge-store::Telemetry/LedgerStore (os mesmos caminhos reais que
+// llm.call/tool.result e a CLI usam), nunca SQL cru.
 //
 // Chamado pelo `webServer.command` de playwright.integration.config.ts;
 // Playwright espera a URL de health check e mata este processo (que repassa
@@ -26,18 +27,37 @@ function run(cmd, args) {
   }
 }
 
-// 1. garante que o binário do CLI e o exemplo de seed estão compilados.
-run('cargo', ['build', '-p', 'forge-cli', '-p', 'forge-store', '--example', 'seed_telemetry'])
+// 1. garante que o binário do CLI e os exemplos de seed estão compilados.
+run('cargo', [
+  'build', '-p', 'forge-cli', '-p', 'forge-store',
+  '--example', 'seed_telemetry', '--example', 'seed_ledger',
+])
 
-// 2. diretório de trabalho isolado para o dashboard (.forge/telemetry.db próprio).
+// 2. diretório de trabalho isolado para o dashboard (.forge/telemetry.db e
+// .forge/forge.db próprios, isolados de qualquer outra execução).
 const workDir = mkdtempSync(join(tmpdir(), 'forge-e2e-'))
 mkdirSync(join(workDir, '.forge'), { recursive: true })
 const dbPath = join(workDir, '.forge', 'telemetry.db')
+const ledgerPath = join(workDir, '.forge', 'forge.db')
 
 // 3. semeia um evento real via o mesmo Telemetry::record usado em produção.
 run('cargo', [
   'run', '-q', '-p', 'forge-store', '--example', 'seed_telemetry', '--',
   dbPath, 'llm.call', 'e2e-integration', '{"provider":"anthropic"}',
+])
+
+// 3b. semeia 2 entradas reais no ledger (mesmo LedgerStore::append usado em
+// produção) com um ator dedicado (e2e-ledger-seed) que nenhum outro spec
+// usa — o teste de Ledger filtra por ele, então não importa a ordem em que
+// os specs desta suíte rodam nem quantas outras entradas (squad/permissões)
+// o mesmo forge.db acumular depois.
+run('cargo', [
+  'run', '-q', '-p', 'forge-store', '--example', 'seed_ledger', '--',
+  ledgerPath, 'session.start', 'e2e-ledger-seed', '{"task":"e2e"}', '2026-01-01T00:00:00Z',
+])
+run('cargo', [
+  'run', '-q', '-p', 'forge-store', '--example', 'seed_ledger', '--',
+  ledgerPath, 'tool.run', 'e2e-ledger-seed', '{"tool":"bash"}', '2026-01-01T00:00:01Z',
 ])
 
 // 4. sobe o dashboard real apontando pro build da SPA, servindo o evento semeado.
