@@ -112,6 +112,8 @@ impl<G: Generator + Send + Sync + 'static> CoreBackend for GatewayCoreBackend<G>
 
 /// Localiza o workspace Python do sidecar: `FORGE_PYTHON_DIR`, senão um
 /// `python/pyproject.toml` subindo a partir do binário ou do cwd.
+/// `pub(crate)` — reusado por `squad_agent.rs` (Onda 4) e `prompt_render.rs`
+/// (Onda 5) para achar o mesmo workspace Python dos dois sidecares.
 pub(crate) fn locate_python_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("FORGE_PYTHON_DIR") {
         let p = PathBuf::from(dir);

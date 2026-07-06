@@ -27,9 +27,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         // Fase 7 Onda 4: `SquadEvent` (e os tipos aninhados do `oneof payload`)
         // vai direto pro SSE do agente web — "sem DTO espelho", serde direto
-        // no tipo gerado. Escopado ao pacote `forge.squad.v1` só (os outros
-        // 3 protos não precisam virar JSON).
+        // no tipo gerado.
         .type_attribute(".forge.squad.v1", "#[derive(serde::Serialize)]")
+        // Fase 7 Onda 5: mesma técnica para `GeneratorInfo`/`GeneratorField`,
+        // que viajam como JSON em `GET /api/prompt/generators`.
+        .type_attribute(".forge.promptforge.v1", "#[derive(serde::Serialize)]")
         .compile_protos(&protos.map(|p| format!("{proto_dir}/{p}")), &[proto_dir])?;
     Ok(())
 }
