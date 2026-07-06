@@ -170,7 +170,7 @@ async fn run_dashboard(port: u16) -> Result<()> {
         "forge dashboard — http://{addr} (assets: {})",
         web_dir.display()
     );
-    forge_server::serve(telemetry, addr, web_dir).await?;
+    forge_server::serve(telemetry, &root, addr, web_dir).await?;
     Ok(())
 }
 
@@ -421,6 +421,24 @@ async fn maybe_compact<G: Generator>(
     Ok(true)
 }
 
+/// Registra no ledger o veredito do vetter para cada skill (built-in +
+/// terceiro), como auditoria append-only (Fase 6 Onda 3). Reusa
+/// `list_skill_statuses` (o mesmo que alimenta `/api/skills`).
+fn record_skill_vetting(root: &std::path::Path, session: &mut session::Session) {
+    use forge_verify::vetter::list_skill_statuses;
+    let mut statuses = list_skill_statuses(&root.join("skills"), "builtin");
+    statuses.extend(list_skill_statuses(
+        &root.join(".forge").join("skills"),
+        "third-party",
+    ));
+    for s in statuses {
+        session.note(
+            "skill.vetting",
+            serde_json::json!({"id": s.id, "status": s.status, "detail": s.detail}),
+        );
+    }
+}
+
 async fn run_once<G: Generator>(
     generator: &G,
     opts: &RunOpts,
@@ -430,6 +448,10 @@ async fn run_once<G: Generator>(
     let tools = crate::skills::build_registry(root);
     let agent_loop = build_loop(generator, opts, &tools)?;
     let mut session = session::Session::open(root, &task, &opts.model)?;
+    // Fase 6 Onda 3: audita no ledger (append-only) o veredito do vetter para
+    // cada skill carregada. A execução de skill já entra no ledger pelos
+    // LoopEvents; isto registra a decisão de vetting em si.
+    record_skill_vetting(root, &mut session);
     let mut durable = open_durable(root, opts, &task)?;
     let mut resolver = CliResolver { auto_yes: opts.yes };
 

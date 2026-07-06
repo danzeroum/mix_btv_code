@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card } from '../../primitives/Card'
 import { Badge } from '../../primitives/Badge'
 import { useToast } from '../../primitives/Toast'
-import { MCP_SERVERS, PERMISSION_MATRIX, SKILLS, reconnectMcp, togglePermissionCell, vetSkill } from '../../../api/skills'
+import { MCP_SERVERS, PERMISSION_MATRIX, SKILLS, reconnectMcp, togglePermissionCell, fetchSkills } from '../../../api/skills'
 import type { PermissionMatrixDecision, SkillEntry } from '../../../types/domain'
 
 const SKILL_COLOR: Record<SkillEntry['status'], string> = {
@@ -23,11 +23,23 @@ export function Skills() {
   const [matrix, setMatrix] = useState(PERMISSION_MATRIX)
   const [mcpServers, setMcpServers] = useState(MCP_SERVERS)
   const [reconnecting, setReconnecting] = useState<string | null>(null)
+  const [revetting, setRevetting] = useState(false)
 
-  async function handleVet(id: string, decision: SkillEntry['status']) {
-    const updated = await vetSkill(id, decision)
-    setSkills((prev) => prev.map((s) => (s.id === id ? updated : s)))
-    toast.push('success', `${id}: ${decision}`)
+  // Fase 6 Onda 3: busca o status REAL do vetter (/api/skills) ao montar; em
+  // dev sem backend, fetchSkills cai no mock. O status é read-only — o vetter
+  // decide (fail-closed), o usuário não sobrepõe.
+  useEffect(() => {
+    void fetchSkills().then(setSkills)
+  }, [])
+
+  async function handleRevet() {
+    setRevetting(true)
+    try {
+      setSkills(await fetchSkills())
+      toast.push('success', 'skills re-vetadas')
+    } finally {
+      setRevetting(false)
+    }
   }
 
   async function handleToggleCell(tool: string, profile: 'build' | 'plan') {
@@ -52,7 +64,12 @@ export function Skills() {
     <div className="grid" style={{ gridTemplateColumns: '1.1fr 1fr' }}>
       <div className="stack">
         <Card>
-          <strong>Skill-vetter</strong>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <strong>Skill-vetter</strong>
+            <button onClick={() => void handleRevet()} disabled={revetting} style={arrowBtn}>
+              {revetting ? 're-vetando…' : 're-vetar'}
+            </button>
+          </div>
           <div className="stack" style={{ marginTop: 8 }}>
             {skills.map((s) => (
               <div key={s.id} className="row" style={{ justifyContent: 'space-between' }}>
@@ -60,19 +77,7 @@ export function Skills() {
                   <strong>{s.id}</strong>
                   <div style={{ fontSize: 11, color: 'var(--faint)' }}>{s.detail}</div>
                 </span>
-                <span className="row">
-                  <Badge color={SKILL_COLOR[s.status]}>{s.status}</Badge>
-                  {s.status !== 'aprovado' && (
-                    <button onClick={() => void handleVet(s.id, 'aprovado')} style={arrowBtn}>
-                      aprovar
-                    </button>
-                  )}
-                  {s.status !== 'bloqueado' && (
-                    <button onClick={() => void handleVet(s.id, 'bloqueado')} style={arrowBtn}>
-                      bloquear
-                    </button>
-                  )}
-                </span>
+                <Badge color={SKILL_COLOR[s.status]}>{s.status}</Badge>
               </div>
             ))}
           </div>

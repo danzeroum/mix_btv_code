@@ -29,16 +29,19 @@ const NEXT_DECISION: Record<PermissionMatrixDecision, PermissionMatrixDecision> 
 }
 
 /**
- * // TODO: backend Fase 5 — o mecanismo existe (`forge-verify::vetter::vet_skill`,
- * ADR 0009) e está testado isoladamente em Rust, mas ainda não há endpoint HTTP
- * que ligue esta tela a ele; continua mock até esse wiring ser feito.
+ * Fase 6 Onda 3: lista as skills com o status REAL do vetter, do endpoint
+ * `/api/skills` (forge-server → `forge-verify::vetter::list_skill_statuses`).
+ * O status é read-only: o vetter decide (fail-closed), o usuário não sobrepõe.
+ * Em falha (ex.: front rodando sem o backend em dev), cai no mock `SKILLS`.
  */
-export async function vetSkill(id: string, decision: SkillEntry['status']): Promise<SkillEntry> {
-  await simulateLatency(250)
-  SKILLS = SKILLS.map((s) => (s.id === id ? { ...s, status: decision } : s))
-  const found = SKILLS.find((s) => s.id === id)
-  if (!found) throw new Error('skill não encontrada')
-  return found
+export async function fetchSkills(): Promise<SkillEntry[]> {
+  try {
+    const resp = await fetch('/api/skills')
+    if (!resp.ok) return SKILLS
+    return (await resp.json()) as SkillEntry[]
+  } catch {
+    return SKILLS
+  }
 }
 
 /** // TODO: backend Fase 5 — persiste a matriz de permissões (tool × agent profile) no forge-core. */

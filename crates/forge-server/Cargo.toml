@@ -7,6 +7,7 @@ description = "API local e dashboard de métricas da plataforma Forge (axum) —
 
 [dependencies]
 forge-store.workspace = true
+forge-verify.workspace = true
 axum.workspace = true
 tokio.workspace = true
 serde.workspace = true
