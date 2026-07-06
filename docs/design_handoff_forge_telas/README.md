@@ -422,6 +422,76 @@ gradiente + letra (recriável em CSS/SVG).
 
 ---
 
+## 12. Telas do Grupo A (Fase 6) — novas superfícies
+
+> Estas telas cobrem o **Grupo A** de `docs/LEVANTAMENTO-UI-DESIGNER.md` (funcionalidades da Fase 6
+> com backend, sem tela). Todos os dados abaixo são **aterrados no código real** do repo — mantenha
+> os valores. No frontend real, cada uma segue o padrão `AsyncStatus` sobre `web/src/api/<x>.ts`.
+> Registrar tela = tocar `nav.ts` + `screenMeta.ts` + `screenComponents.tsx` + `types/domain.ts`.
+
+### A1. Console MCP (admin) — `mcp`
+Substitui o "pontinho de saúde" mock da tela Skills. Duas colunas:
+- **Servidores** (`.forge/mcp.toml`, loader `forge-cli/src/skills.rs::load_mcp_servers`): id · transporte
+  (stdio/sse) · status (conectado/degradado/desconectado) · nº de tools. Conexão é **por chamada**
+  (connect→call→encerra, `mcp.rs`). Ação: (re)conectar. Não há "aprovar servidor" — confiança é a
+  declaração no `.toml` (ADR 0012).
+- **Tools expostas**: nome **namespaced** `mcp__<server>__<tool>` (o que o agente vê), `input_schema`
+  resumido, e **política por chamada** (allow/ask/deny). Cada chamada MCP passa pelo gate do core Rust
+  (scope `mcp:<server>/<tool> <preview>`, `mcp.rs:52-56`) — nunca auto-aprovada.
+- **Backend a expor:** `GET /api/mcp` (servidores + `McpToolMeta{name,description,input_schema}` + status).
+
+### A2. Experimentos A/B (admin) — `experimentos`
+Relatório `forge experiment` (`forge-schemas/src/experiment.rs`): `ExperimentReport{experiment, metric,
+variants[], verdict, winner?, p_value}`; cada `VariantStats{variant, n, successes, rate}`.
+- Duas barras (A×B) com rate/n; **veredito honesto** em 3 estados: `Significant` (com vencedor),
+  `Inconclusive` (**sem** vencedor, mesma dignidade), `InsufficientData` (< 20/variante). `p_value` vs α=0.05.
+- **⚠ Caveat (no design):** nenhum código de produção ainda escreve a telemetria de atribuição
+  (`props.experiment/variant/success`) — só testes e `examples/seed_telemetry.rs`. A tela mostra **dados
+  semeados** até a instrumentação existir. O banner de aviso comunica isso.
+- **Backend a expor:** `GET /api/experiment/<nome>` (hoje CLI-only, `main.rs:178`).
+
+### A3. Mapa de memória do squad / RAG (usuário) — `memoria`
+`python/packages/forge-squad/.../memory.py`. Duas colunas:
+- **Memória por agente**: registros `{timestamp, agent, decision, confidence}` agrupados por agente,
+  com **esquecimento inteligente** (decay). Persistido em `.forge/squad-memory/agent_memories.jsonl`.
+- **Busca (recall) FUNCIONAL:** input + botão ↵. Estados **idle → loading → done(results|empty)**.
+  Retorna lista ranqueada por `score` (0–1) mostrado como número. É recuperação **léxica TF-IDF**
+  (ADR 0013), não semântica — o texto do rodapé é honesto sobre "por termos". No protótipo o recall é
+  simulado client-side (`runRecall()`); no real: `CoreService.Recall` via gRPC lendo `memory.py:110-131`.
+- **Backend a expor:** rota (via gRPC/servidor) para ler o corpus + rodar recall.
+
+### A4. Rate limits por tier (admin) — `ratelimit`
+`forge-llm/src/rate_limit.rs`. Três cards (Small 60 / Medium 30 / Large 15, **janela de 600s**) com
+barra used/cap. Salvaguarda de **custo** (não defesa multiusuário): small generoso, large conservador.
+- **⚠ Caveat (banner):** o `RateLimiter` **não expõe getter de uso** (`poll` é privado) — o consumo é
+  ilustrativo até a engenharia expor a superfície. Os tetos são reais. Hit de cache não consome vaga.
+
+### A5. Uso por modelo (admin) — `modelos`
+Extensão da Telemetria. Tabela por modelo: volume de chamadas (barra) + cache-hit %, agrupado de
+`props.model` (já presente em cada evento `llm.call`/`cache.*`). Falta só um `summary` que agrupe por
+modelo (hoje agrupa por nome do evento, `telemetry.rs:83-109`).
+
+### A7. Language servers / LSP (admin) — `lsp`
+`forge-tools/src/lsp.rs`. Servidores declarados em `.forge/lsp.toml` (rust-analyzer/pyright/tsserver):
+status (indexado/indexando/preguiçoso), nº de diagnósticos. **Sessão preguiçosa e reusada** (≠ MCP):
+sobe no 1º uso, reaproveita o processo indexado, morto no `Drop`. Consultas expostas como tools:
+`lsp__<id>__{definition,references,diagnostics}` (posições 0-indexed), sob o mesmo motor de permissões
+(scope `lsp:<id>/<query> <file>`).
+
+### A6. Sandbox & skills de terceiro (admin) — `sandbox`
+`forge-tools/src/sandbox.rs` (bollard). Duas colunas:
+- **Perfil de confinamento** (default `Sandbox::new`): `python:3.11-slim`, rede **none**, mem **512 MB**,
+  cpu **0.5**, timeout **30s**, rootfs **read-only** (único mount `/work` gravável), `cap-drop ALL` +
+  `no-new-privileges`. **Fail-closed:** sem daemon Docker → erro claro, nunca um "rodou" silencioso.
+- **Ciclo de vida de skills de terceiro:** instalar (`.forge/skills/`) → vetar (skill-vetter bloqueante,
+  ADR 0009/0011) → habilitar/remover. Estados: habilitada / em análise / bloqueada (ex.: pede rede → nega).
+  Skill de terceiro roda no sandbox; built-in confiável segue o caminho não-containerizado.
+
+> **Ordem no menu admin:** Telemetria · Uso por modelo · Experimentos A/B · Rate limits · Console MCP ·
+> Language servers · Sandbox & skills · Ledger · Verificação · Providers · Skills. (Usuário: +Mapa de memória.)
+
+---
+
 ## 11. Arquivos deste pacote
 - `README.md` — este documento (auto-suficiente).
 - `design/Forge Telas.dc.html` — protótipo de referência (todas as telas + lógica).
