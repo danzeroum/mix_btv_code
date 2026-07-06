@@ -137,6 +137,13 @@ impl SquadSupervisor {
         Ok(Self { child, socket_path })
     }
 
+    /// PID do processo supervisionado — usado pelo `SquadPool` (Onda 3)
+    /// para provar estabilidade entre chamadas e detectar troca após um
+    /// restart.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
     /// Mata o squad (SIGKILL). Em Unix, sinaliza o **grupo** de processos
     /// (uv + python), não só o wrapper `uv` — do contrário o servidor
     /// Python ficaria órfão. Usado para injeção de falha nos testes de

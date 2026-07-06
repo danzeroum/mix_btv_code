@@ -22,23 +22,49 @@ impl SidecarSupervisor {
     /// [`Self::wait_ready`] para esperar o sidecar responder.
     pub fn spawn(python_workspace_dir: &Path, socket_path: PathBuf) -> Result<Self, SidecarError> {
         let _ = std::fs::remove_file(&socket_path); // socket de uma execução anterior
-        let child = Command::new("uv")
-            .args([
-                "run",
-                "python",
-                "-m",
-                "forge_promptforge.server",
-                "--socket",
-            ])
-            .arg(&socket_path)
-            .current_dir(python_workspace_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
+        let mut cmd = Command::new("uv");
+        cmd.args([
+            "run",
+            "python",
+            "-m",
+            "forge_promptforge.server",
+            "--socket",
+        ])
+        .arg(&socket_path)
+        .current_dir(python_workspace_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+        // `uv run` spawna o Python como filho: matar só o processo `uv`
+        // deixaria o servidor Python órfão (mesmo achado do `SquadSupervisor`,
+        // squad_client.rs). Líder do próprio grupo → `kill()` sinaliza os dois.
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let child = cmd
             .spawn()
             .map_err(|e| SidecarError::Unavailable(format!("spawn do sidecar: {e}")))?;
         Ok(Self { child, socket_path })
+    }
+
+    /// PID do processo supervisionado — usado pelo serviço de longa duração
+    /// (Onda 3) para provar estabilidade entre chamadas (mesmo PID) e
+    /// detectar troca após um restart (PID novo).
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    /// Mata o processo supervisionado (SIGKILL no grupo inteiro em Unix —
+    /// ver comentário em `spawn`). Usado para reinício sob demanda e para
+    /// injeção de falha em teste (mesmo padrão de `SquadSupervisor::kill`).
+    pub async fn kill(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
+        self.child.kill().await
     }
 
     /// Faz poll do socket + health check até `timeout`. Devolve um cliente
