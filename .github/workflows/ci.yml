@@ -169,6 +169,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # uv é necessário aqui pelo mesmo motivo do job `rust`: o e2e de
+      # integração do squad (squad-real-backend.spec.ts) sobe o
+      # `forge_squad.server` real via `uv run`. Sem resolver o venv antes,
+      # o primeiro `uv run` da suíte tenta baixar as dependências a frio e
+      # estoura o timeout dos testes Playwright (achado real — Onda 4).
+      - uses: astral-sh/setup-uv@v5
+      - run: cd ../python && uv sync
       - uses: actions/setup-node@v4
         with:
           node-version: 22

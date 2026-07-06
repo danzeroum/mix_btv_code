@@ -22,8 +22,11 @@ test('squad ao vivo: agentes aparecem em tempo real, gate HITL bloqueia até a U
 
   // Cada agente aparece conforme sua Proposal real chega pelo SSE — prova
   // que a lista é derivada de eventos ao vivo, não o array mock antigo
-  // (SQUAD_AGENTS fixo com os 5 agentes sempre presentes).
-  await expect(page.getByText('architect', { exact: true })).toBeVisible({ timeout: 20_000 })
+  // (SQUAD_AGENTS fixo com os 5 agentes sempre presentes). Timeout maior
+  // só neste primeiro — cobre o pior caso de `SquadPool::acquire` (até 30s
+  // de `wait_ready`, ver `default_squad_pool`) + o pipeline de /verify
+  // antes dele; os agentes seguintes chegam no mesmo stream já aberto.
+  await expect(page.getByText('architect', { exact: true })).toBeVisible({ timeout: 45_000 })
   await expect(page.getByText('developer', { exact: true })).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('auditor', { exact: true })).toBeVisible({ timeout: 20_000 })
 
