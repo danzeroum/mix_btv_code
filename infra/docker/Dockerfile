@@ -20,19 +20,6 @@
 # sandbox de skills de terceiro exige o socket do Docker (DinD), e a key só
 # existe no processo Rust (ADR 0001).
 
-# ---------- build (Rust) ----------
-FROM rust:1-bookworm AS build
-WORKDIR /src
-# protoc é vendorizado (protoc-bin-vendored), TLS é rustls e SQLite é bundled:
-# o build NÃO precisa de protobuf-compiler / libssl-dev / libsqlite3-dev.
-COPY . .
-RUN cargo build --release -p forge-cli
-# clippy/rustfmt não vêm no profile default do rustup — `forge verify` (os
-# default_steps: cargo test/clippy/fmt) precisa deles no RUNTIME também, senão
-# falha com "No such file or directory" (o binário não existe, não é bug do
-# Forge). Adiciona aqui pra copiar o toolchain inteiro abaixo.
-RUN rustup component add clippy rustfmt
-
 # ---------- build (frontend do dashboard) ----------
 # web/dist NÃO é commitado (web/.gitignore) — precisa ser buildado. Sem este
 # estágio, `forge dashboard` sobe mas não tem SPA pra servir (404 no `/`).
@@ -46,44 +33,46 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
 
-# ---------- runtime ----------
-FROM debian:bookworm-slim AS runtime
+# ---------- imagem única (build + runtime do Rust) ----------
+# Deliberadamente UMA imagem só pro Rust, em vez de compilar em `rust:1-bookworm`
+# e copiar o toolchain pra um runtime `debian:bookworm-slim` separado: essa
+# mistura de bases já quebrou (linker `cc` incompatível entre o gcc/libc de uma
+# imagem e o Rust linkado na outra). Aqui o mesmo ambiente que compila o binário
+# é o que roda `forge verify` (cargo test/clippy/fmt) depois — zero risco de
+# descompasso de ABI. Custo aceito: imagem maior; é imagem de teste, não de
+# produção.
+FROM rust:1-bookworm
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git gcc \
+ && apt-get install -y --no-install-recommends ca-certificates curl git \
  && rm -rf /var/lib/apt/lists/*
+# clippy/rustfmt não vêm no profile default do rustup — `forge verify` (os
+# default_steps: cargo test/clippy/fmt) precisa deles.
+RUN rustup component add clippy rustfmt
+
+WORKDIR /src
+COPY . .
+RUN cargo build --release -p forge-cli \
+ && cp target/release/forge /usr/local/bin/forge
 
 # uv: o sidecar (squad/promptforge) é spawnado pelo processo Rust via `uv run`.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Toolchain Rust completo (cargo/rustc/clippy/rustfmt), copiado do estágio de
-# build — é o que permite `forge verify` (cargo test/clippy/fmt) rodar de
-# verdade dentro do container. A imagem oficial `rust:*` instala em
-# /usr/local/cargo e /usr/local/rustup por convenção; `gcc` (acima) é o linker
-# que `cargo build`/`test` chamam via `cc`.
-COPY --from=build /usr/local/cargo /usr/local/cargo
-COPY --from=build /usr/local/rustup /usr/local/rustup
-ENV CARGO_HOME=/usr/local/cargo \
-    RUSTUP_HOME=/usr/local/rustup \
-    PATH="/usr/local/cargo/bin:${PATH}"
-
-WORKDIR /app
-COPY --from=build /src/target/release/forge /usr/local/bin/forge
-
 # Workspace Python + ambiente uv resolvido.
 # CRÍTICO: FORGE_PYTHON_DIR. Sem ele, o sidecar procura um caminho de
-# compile-time (`<crate>/../../python`) que NÃO existe nesta imagem, e o
-# squad/promptforge degrada EM SILÊNCIO para agente-único. (Ver
-# crates/forge-cli/src/sidecar.rs.)
-COPY python /app/python
-RUN cd /app/python && uv sync
-ENV FORGE_PYTHON_DIR=/app/python
+# compile-time (`<crate>/../../python`) que NÃO existe no container final (o
+# repo real é montado em /work, não em /src), e o squad/promptforge degrada EM
+# SILÊNCIO para agente-único. (Ver crates/forge-cli/src/sidecar.rs.)
+RUN cd /src/python && uv sync
+ENV FORGE_PYTHON_DIR=/src/python
 
 # SPA do dashboard, já buildada no estágio web-build.
-COPY --from=web-build /web/dist /app/web/dist
-ENV FORGE_WEB_DIR=/app/web/dist
+COPY --from=web-build /web/dist /src/web/dist
+ENV FORGE_WEB_DIR=/src/web/dist
 
 # Diretório onde o agente atua — monte o SEU projeto aqui (-v "$PWD":/work).
+# `forge verify` roda `cargo test/clippy/fmt` contra O QUE ESTIVER em /work
+# (o projeto montado), não contra /src (a cópia usada só pra compilar o forge).
 WORKDIR /work
 # CMD (não ENTRYPOINT): `docker run forge:test` cai num shell interativo, mas
 # `docker run forge:test forge dashboard --port 7878` SUBSTITUI o CMD inteiro e

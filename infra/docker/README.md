@@ -105,12 +105,16 @@ dashboard não foi projetado nem testado para acesso público na internet.
 
 ## `forge verify` dentro do container
 
-A imagem carrega o toolchain Rust completo (cargo/rustc/clippy/rustfmt) no
-runtime, especificamente para `forge verify` funcionar — os `default_steps()`
-dele rodam `cargo test/clippy/fmt` de verdade contra o que estiver montado em
-`/work`. Isso deixa a imagem maior (~1-2GB a mais) de propósito; sem isso, os
-três passos falhariam com "No such file or directory" (o binário `cargo`
-simplesmente não existiria no runtime).
+A imagem é construída **inteira em cima de `rust:1-bookworm`** (não builda o
+binário numa imagem e roda noutra) — de propósito: `forge verify` roda
+`cargo test/clippy/fmt` de verdade contra o que estiver montado em `/work`, e
+isso exige o mesmo `cc`/`libc`/linker que compilou o binário. Uma versão
+anterior tentava copiar só o toolchain Rust (`/usr/local/cargo`,
+`/usr/local/rustup`) de uma imagem `rust:1-bookworm` para um runtime
+`debian:bookworm-slim` separado — e isso quebrou com `linking with cc failed`
+(o `gcc` reinstalado numa base diferente não bate 100% com o que o Rust daquela
+imagem espera). Uma imagem só elimina essa classe de bug por construção; o
+custo é uma imagem maior — aceitável para teste, não para produção.
 
 **Primeira execução é mais lenta**: como `/work` é o seu projeto montado (bind
 mount), o `target/` que o `cargo test` gera fica no **host**, não só no
@@ -121,7 +125,7 @@ rápidas, mesmo depois de `--rm` no container.
 ## As 4 pegadinhas de container (o que muda vs. rodar na máquina)
 
 1. **`FORGE_PYTHON_DIR` é obrigatório** — e a imagem já o define
-   (`/app/python`). Sem essa env var, o sidecar procura um caminho de
+   (`/src/python`). Sem essa env var, o sidecar procura um caminho de
    compile-time inexistente na imagem e o **squad/promptforge degrada em
    silêncio** para agente-único (`crates/forge-cli/src/sidecar.rs:20`). Se você
    montar/rebuild de outro jeito, mantenha `FORGE_PYTHON_DIR` apontando para o
