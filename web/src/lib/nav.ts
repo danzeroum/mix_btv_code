@@ -15,6 +15,7 @@ export const ADMIN_NAV: NavItem[] = [
   { id: 'telemetria', icon: '▦', label: 'Telemetria', hint: '127.0.0.1:7878' },
   { id: 'mcp', icon: '⎈', label: 'Console MCP', hint: 'servidores · tools · política' },
   { id: 'modelos', icon: '◈', label: 'Uso por modelo', hint: 'chamadas · cache · tier' },
+  { id: 'memoria', icon: '⌗', label: 'Memória do squad', hint: 'mapa · busca léxica' },
   { id: 'ledger', icon: '⛓', label: 'Ledger / Auditoria', hint: 'hash-chain append-only' },
   { id: 'verify', icon: '✓', label: 'Verificação & Review', hint: '/verify · value_score' },
   { id: 'providers', icon: '⇄', label: 'Providers & Limites', hint: 'fallback · rate limit' },

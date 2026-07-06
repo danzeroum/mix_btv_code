@@ -16,6 +16,7 @@
 //!   serializaria squads concorrentes à toa.
 
 use crate::client::{SidecarClient, SidecarError};
+use crate::memory_client::{MemoryClient, MemorySupervisor};
 use crate::squad_client::{SquadClient, SquadSupervisor};
 use crate::supervisor::SidecarSupervisor;
 use std::path::PathBuf;
@@ -87,6 +88,79 @@ impl SidecarService {
     /// Mata o processo supervisionado agora, se algum estiver de pé — a
     /// próxima chamada a `client()` sobe um processo novo. Usado para
     /// reinício sob demanda e para testes injetarem uma queda.
+    pub async fn kill_current(&self) -> std::io::Result<()> {
+        let mut guard = self.state.lock().await;
+        if let Some(state) = guard.as_mut() {
+            state.supervisor.kill().await?;
+        }
+        Ok(())
+    }
+}
+
+struct MemoryState {
+    supervisor: MemorySupervisor,
+    client: MemoryClient,
+}
+
+/// Serviço de longa duração para o sidecar de memória do squad (Fase 7
+/// Onda 8, ADR 0022) — instância ÚNICA compartilhada, mesmo desenho de
+/// [`SidecarService`]: `Recall`/`List` são leituras stateless sobre o
+/// corpus episódico, então serializar uma consulta por vez é aceitável (e
+/// deliberadamente NÃO usa o `SquadPool` — misturaria disputa de recurso
+/// entre leitura de memória e execução real de squad à toa).
+pub struct MemoryService {
+    python_workspace_dir: PathBuf,
+    socket_path: PathBuf,
+    /// `None` em produção (mesma resolução relativa que `SquadServicer`
+    /// já usa — ver doc de `MemorySupervisor::spawn`); `Some` em testes,
+    /// para um corpus isolado e determinístico.
+    memory_dir: Option<PathBuf>,
+    ready_timeout: Duration,
+    state: Mutex<Option<MemoryState>>,
+}
+
+impl MemoryService {
+    pub fn new(
+        python_workspace_dir: PathBuf,
+        socket_path: PathBuf,
+        memory_dir: Option<PathBuf>,
+        ready_timeout: Duration,
+    ) -> Self {
+        Self {
+            python_workspace_dir,
+            socket_path,
+            memory_dir,
+            ready_timeout,
+            state: Mutex::new(None),
+        }
+    }
+
+    pub async fn client(&self) -> Result<MemoryClient, SidecarError> {
+        let mut guard = self.state.lock().await;
+        if let Some(state) = guard.as_mut() {
+            if let Ok((true, _)) = state.client.health().await {
+                return Ok(state.client.clone());
+            }
+        }
+        let mut supervisor = MemorySupervisor::spawn(
+            &self.python_workspace_dir,
+            self.socket_path.clone(),
+            self.memory_dir.as_deref(),
+        )?;
+        let client = supervisor.wait_ready(self.ready_timeout).await?;
+        let ready = client.clone();
+        *guard = Some(MemoryState { supervisor, client });
+        Ok(ready)
+    }
+
+    pub async fn current_pid(&self) -> Option<u32> {
+        self.state
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|s| s.supervisor.pid())
+    }
+
     pub async fn kill_current(&self) -> std::io::Result<()> {
         let mut guard = self.state.lock().await;
         if let Some(state) = guard.as_mut() {
@@ -319,6 +393,91 @@ mod tests {
             client4.health().await.unwrap().0,
             "o processo novo deveria responder"
         );
+    }
+
+    /// Fronteira da Onda 8 (`MemoryService`, ADR 0022): mesmo contrato do
+    /// `SidecarService` (singleton, PID estável entre chamadas, restart
+    /// após `kill_current`), agora provado sobre um sidecar de memória REAL
+    /// — e, além da estabilidade do processo, que `Recall`/`List` batem com
+    /// o que foi escrito diretamente no JSONL episódico (mesmo formato que
+    /// `AgentMemorySystem.remember_decision` grava), fechando o laço
+    /// gRPC-Rust ↔ corpus-Python de ponta a ponta.
+    #[tokio::test]
+    async fn memory_service_reusa_processo_e_recall_list_batem_com_o_corpus_real() {
+        let dir = python_workspace_dir();
+        if uv_missing() || !dir.join("pyproject.toml").exists() {
+            eprintln!("uv/workspace Python ausente — pulando teste de memory service real");
+            return;
+        }
+        let memory_dir = std::env::temp_dir().join(format!(
+            "forge-memory-service-{}-{}",
+            std::process::id(),
+            "corpus"
+        ));
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let episodic_path = memory_dir.join("agent_memories.jsonl");
+        std::fs::write(
+            &episodic_path,
+            concat!(
+                r#"{"timestamp":"2026-01-01T00:00:00Z","agent":"architect","decision":{"summary":"corrigir login e senha do usuário"},"confidence":0.9}"#,
+                "\n",
+                r#"{"timestamp":"2026-01-01T00:00:01Z","agent":"architect","decision":{"summary":"isolar o contêiner docker sem rede"},"confidence":0.4}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let socket =
+            std::env::temp_dir().join(format!("forge-memory-service-{}.sock", std::process::id()));
+        // `Some(memory_dir)` aponta o `--memory-dir` do sidecar Python pro
+        // mesmo diretório do JSONL semeado acima — o processo abre o
+        // corpus real, não recria vazio (produção usa `None`, ver doc de
+        // `MemoryService`).
+        let service = MemoryService::new(dir, socket, Some(memory_dir), Duration::from_secs(30));
+        let mut client1 = service
+            .client()
+            .await
+            .expect("primeira chamada sobe o processo");
+        let pid1 = service.current_pid().await.expect("pid após subir");
+        assert!(client1.health().await.unwrap().0);
+
+        let recall = client1
+            .recall("problema de login e senha", 3)
+            .await
+            .expect("recall deveria funcionar");
+        assert_eq!(recall.matches.len(), 1, "só a memória de login é relevante");
+        assert!(recall.matches[0].decision_json.contains("login"));
+        assert_eq!(recall.matches[0].agent, "architect");
+
+        let list = client1
+            .list(None, 50)
+            .await
+            .expect("list deveria funcionar");
+        assert_eq!(list.agents.len(), 1);
+        assert_eq!(list.agents[0].agent, "architect");
+        assert_eq!(list.agents[0].count, 2);
+
+        let mut client2 = service.client().await.expect("segunda chamada reusa");
+        assert_eq!(
+            service.current_pid().await,
+            Some(pid1),
+            "PID deveria ser estável"
+        );
+        assert!(client2.health().await.unwrap().0);
+
+        service
+            .kill_current()
+            .await
+            .expect("kill deveria funcionar");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let mut client3 = service
+            .client()
+            .await
+            .expect("terceira chamada sobe um processo novo");
+        let pid2 = service.current_pid().await.expect("pid após restart");
+        assert_ne!(pid1, pid2, "PID deveria mudar após o restart");
+        assert!(client3.health().await.unwrap().0);
     }
 
     async fn spawn_test_core(prefix: &str) -> (tokio::task::JoinHandle<()>, PathBuf) {

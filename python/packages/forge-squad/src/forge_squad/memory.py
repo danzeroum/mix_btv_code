@@ -107,6 +107,16 @@ class AgentMemorySystem:
                     records.append(rec)
         return records
 
+    def list_memories(self, agent: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Lista memórias persistidas, mais recentes primeiro, opcionalmente
+        filtradas por agente (Fase 7 Onda 8, A3 — mapa de memória). Reusa
+        `_load_corpus()` (fonte da verdade) — zero lógica de indexação nova,
+        só filtro + ordenação + corte."""
+        corpus = self._load_corpus()
+        if agent:
+            corpus = [rec for rec in corpus if rec.get("agent") == agent]
+        return list(reversed(corpus))[:limit]
+
     def recall_similar(self, query: str, k: int = 5) -> dict[str, Any]:
         """Recupera as `k` memórias mais similares à `query` por TF-IDF-cosseno
         sobre o corpus episódico (Fase 6 Onda 6 — recuperação real, substitui o

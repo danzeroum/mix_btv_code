@@ -1,0 +1,66 @@
+// MemoryService — memória do squad (Fase 7 Onda 8, ADR 0022).
+//
+// Direção OPOSTA de CoreService: aqui é o Python quem serve (dono do dado —
+// o corpus episódico JSONL e o índice TF-IDF vivem em forge_squad), o Rust
+// quem chama. CoreService.Recall/Remember (core.proto) ficam Unimplemented
+// e não são usados — são a direção errada (Rust servindo, Python chamando),
+// um stub abandonado da Fase 4.
+//
+// Sem `Remember`: quem grava memória é só o orquestrador via chamada direta
+// em processo (AgentMemorySystem.remember_decision) — nunca pela rede.
+
+syntax = "proto3";
+
+package forge.memory.v1;
+
+service MemoryService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  // Busca léxica (TF-IDF, não semântica) sobre o corpus episódico.
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  // Mapa de memória: lista/agrupa por agente.
+  rpc List(ListRequest) returns (ListResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool ready = 1;
+  string version = 2;
+}
+
+message RecallRequest {
+  string query = 1;
+  uint32 k = 2;
+}
+
+message MemoryMatch {
+  string id = 1;
+  string agent = 2;
+  // JSON livre da decisão recuperada (mesmo formato de `remember_decision`).
+  string decision_json = 3;
+  string timestamp = 4;
+  double score = 5;
+}
+
+message RecallResponse {
+  repeated MemoryMatch matches = 1;
+}
+
+message ListRequest {
+  optional string agent = 1;
+  uint32 limit = 2;
+}
+
+// Resumo real por agente — nunca inclui tendência de esquecimento (não há
+// cálculo nenhum disso no código; `forgetting.py` é código morto).
+message MemorySummary {
+  string agent = 1;
+  uint32 count = 2;
+  string latest_decision_json = 3;
+  string latest_timestamp = 4;
+  double top_confidence = 5;
+}
+
+message ListResponse {
+  repeated MemorySummary agents = 1;
+}

@@ -22,6 +22,7 @@ export const SCREEN_META: Record<ScreenId, ScreenMeta> = {
   telemetria: { kicker: '127.0.0.1:7878', title: 'Telemetria', note: 'atualiza a cada 5s', accent: 'var(--teal)', chromeIcon: '▦', chromeRight: 'dashboard' },
   mcp: { kicker: '.forge/mcp.toml', title: 'Console MCP', note: 'sondagem ao vivo · política real', accent: 'var(--wire)', chromeIcon: '⎈', chromeRight: 'mcp' },
   modelos: { kicker: 'telemetria', title: 'Uso por modelo', note: 'chamadas · cache · tier', accent: 'var(--teal)', chromeIcon: '◈', chromeRight: 'uso' },
+  memoria: { kicker: 'RAG léxico', title: 'Memória do squad', note: 'TF-IDF, não semântico', accent: 'var(--wire)', chromeIcon: '⌗', chromeRight: 'memória' },
   ledger: { kicker: 'hash-chain', title: 'Ledger / Auditoria', note: 'append-only · Nada Fake', accent: 'var(--ok)', chromeIcon: '⛓', chromeRight: 'auditoria' },
   verify: { kicker: '/verify', title: 'Verificação & review por valor', note: 'gate > 0.70', accent: 'var(--ok)', chromeIcon: '✓', chromeRight: 'verify' },
   providers: { kicker: 'gateway LLM', title: 'Providers & rate limits', note: 'keys só no Rust', accent: 'var(--rust)', chromeIcon: '⇄', chromeRight: 'gateway' },

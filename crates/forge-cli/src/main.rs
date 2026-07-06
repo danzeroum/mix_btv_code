@@ -7,6 +7,7 @@
 
 mod cache;
 mod mcp_console;
+mod memory_console;
 mod prompt_render;
 mod rate_limit_gen;
 mod session;
@@ -289,7 +290,12 @@ async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
         let sidecar_service = prompt_render::default_sidecar_service(&root);
         let prompt_router = prompt_render::router(sidecar_service);
         let mcp_router = mcp_console::router(root.clone());
-        let extra_router = squad_router.merge(prompt_router).merge(mcp_router);
+        let memory_service = memory_console::default_memory_service(&root);
+        let memory_router = memory_console::router(memory_service);
+        let extra_router = squad_router
+            .merge(prompt_router)
+            .merge(mcp_router)
+            .merge(memory_router);
         web_agent::serve_with_agent(
             telemetry,
             prompt_library,

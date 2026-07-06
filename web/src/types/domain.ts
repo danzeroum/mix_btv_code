@@ -10,7 +10,15 @@ export type UserScreenId =
   | 'designer'
   | 'sugestoes'
 
-export type AdminScreenId = 'telemetria' | 'mcp' | 'modelos' | 'ledger' | 'verify' | 'providers' | 'skills'
+export type AdminScreenId =
+  | 'telemetria'
+  | 'mcp'
+  | 'modelos'
+  | 'memoria'
+  | 'ledger'
+  | 'verify'
+  | 'providers'
+  | 'skills'
 
 export type ScreenId = UserScreenId | AdminScreenId
 

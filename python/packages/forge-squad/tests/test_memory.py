@@ -38,6 +38,36 @@ def test_recall_similar_recupera_memoria_lembrada(tmp_path):
     assert result["scores"][0] > 0.0
 
 
+def test_list_memories_mais_recentes_primeiro_e_respeita_limit(tmp_path):
+    """Fase 7 Onda 8 (A3): `list_memories` devolve mais recente primeiro
+    (mesmo contrato de `LedgerStore::recent` do lado Rust) e respeita o limit."""
+    memory = AgentMemorySystem(storage_dir=tmp_path)
+    memory.remember_decision("dev", {"confidence": 0.1, "summary": "primeira"})
+    memory.remember_decision("dev", {"confidence": 0.2, "summary": "segunda"})
+    memory.remember_decision("dev", {"confidence": 0.3, "summary": "terceira"})
+
+    all_memories = memory.list_memories()
+    assert [m["decision"]["summary"] for m in all_memories] == ["terceira", "segunda", "primeira"]
+
+    limited = memory.list_memories(limit=2)
+    assert len(limited) == 2
+    assert limited[0]["decision"]["summary"] == "terceira"
+
+
+def test_list_memories_filtra_por_agente(tmp_path):
+    memory = AgentMemorySystem(storage_dir=tmp_path)
+    memory.remember_decision("architect", {"confidence": 0.9, "summary": "plano"})
+    memory.remember_decision("developer", {"confidence": 0.5, "summary": "implementação"})
+    memory.remember_decision("architect", {"confidence": 0.7, "summary": "revisão"})
+
+    only_architect = memory.list_memories(agent="architect")
+    assert len(only_architect) == 2
+    assert all(m["agent"] == "architect" for m in only_architect)
+
+    only_qa = memory.list_memories(agent="qa")
+    assert only_qa == []
+
+
 def test_recall_similar_corpus_vazio_devolve_vazio(tmp_path):
     """Sem memórias, o recall é honestamente vazio (não inventa relevância)."""
     memory = AgentMemorySystem(storage_dir=tmp_path)

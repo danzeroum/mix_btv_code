@@ -654,3 +654,74 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   read-only, e o custo de semear um servidor MCP fixture real + eventos de
   telemetria com `model` já estava pago pelos testes Rust; estender ao
   browser foi incremental.
+
+## Onda 8 — Mapa de memória do squad + busca RAG (A3, ADR 0022)
+
+- **[decisão] `MemoryService` novo, não `CoreService.Recall/Remember`.**
+  Confirmado no código antes de implementar: `core_server.rs`'s
+  `recall`/`remember` são `Status::unimplemented("... memória é local ao
+  Python no orquestrador atual")` — stub abandonado da Fase 4, direção
+  errada (`CoreService` é servido pelo Rust, chamado pelo Python; memória
+  precisa do oposto). Detalhes completos e alternativas descartadas
+  (estender `SquadService`) em ADR 0022 — não repetido aqui.
+- **[achado real, corrigido] o próprio handoff de design erra a direção do
+  RPC** (cita "CoreService.Recall" na cópia de carregamento do protótipo) —
+  a implementação e a cópia da UI real usam `MemoryService.Recall`, não
+  repetem o engano.
+- **[decisão] supervisão singleton (`MemoryService`, mirror de
+  `SidecarService`), não `SquadPool`.** `Recall`/`List` são leituras
+  stateless — um pool misturaria disputa de recurso entre leitura de
+  memória e execução real de squad à toa. Ver ADR 0022 para o raciocínio
+  completo.
+- **[achado real, corrigido durante a implementação] `MemorySupervisor`
+  precisa concordar com `SquadServicer` sobre ONDE o corpus mora.**
+  `forge_squad.server`'s `SquadServicer` (quem de fato ESCREVE memória via
+  `remember_decision`) nunca recebe `--memory-dir` — cai no default de
+  `AgentMemorySystem()` (`.forge/squad-memory` relativo ao `current_dir` do
+  processo, que é o `python_workspace_dir`). Meu primeiro rascunho do teste
+  de `MemoryService` tentou contornar isso com uma env var fictícia que o
+  supervisor não lia — não funcionava (o processo Python simplesmente
+  ignorava). Corrigido adicionando `memory_dir: Option<&Path>` de verdade a
+  `MemorySupervisor::spawn`/`MemoryService::new`, propagado como
+  `--memory-dir` (flag que `memory_server.py` já aceitava) só quando
+  `Some` — produção passa `None` (mesma resolução relativa do squad real,
+  documentado no ADR), testes passam `Some(dir)` para um corpus isolado.
+- **[nota] `list_memories(agent?, limit)` (`memory.py`) é só filtro +
+  ordenação + corte sobre `_load_corpus()` já existente** — zero lógica de
+  indexação nova, como planejado. O agrupamento por agente (contagem,
+  decisão mais recente, maior confiança) mora em `memory_server.py`'s `List`
+  RPC (não em `memory.py`), já que é apresentação da resposta gRPC, não uma
+  capacidade do núcleo de memória em si.
+- **[decisão] descope explícito de `forgetting.py`** (código morto,
+  confirmado por grep — só o teste unitário dele chama) — o mapa de memória
+  não tem coluna de tendência de esquecimento; só campos que o código
+  realmente calcula. Ver ADR 0022.
+- **[decisão] tela registrada como admin (`memoria`), não user**, mesmo
+  categoria das outras 2 telas do Grupo A desta fase (`mcp`, `modelos`) —
+  consistência com o agrupamento original do levantamento, não uma
+  reclassificação individual.
+- **[decisão] cartão "Mapa de memória do squad" de `Sugestoes.tsx` foi
+  retargetado** (`relatedScreen: 'squad'` → `'memoria'`) e marcado "✓
+  entregue" (badge nova, `delivered?: boolean` no array de propostas — não
+  existia nenhuma tela ainda marcada assim). Âncora do cartão trocada de
+  `forge_squad.memory / forgetting` para `forge_squad.memory + recall.py
+  (TF-IDF)` — `forgetting.py` nunca foi o que ficou de pé.
+- **[nota] `CARGO_BIN_EXE_forge_mcp_fixture` (Onda 7) não é o único caso de
+  cross-crate fixture nesta fase — `memory_server.py` tem o equivalente
+  Python:** os testes de `memory_client.rs`/`service.rs`/`memory_console.rs`
+  usam `uv run` real (mesmo padrão já usado por `SidecarService`/`SquadPool`
+  desde a Onda 3), não precisam de nenhum workaround — só o caso Rust→Rust
+  cross-crate (Onda 7) tinha esse problema específico.
+- **[decisão] seed do corpus de memória para o Playwright grava DIRETO em
+  `python/.forge/squad-memory/agent_memories.jsonl`** (o caminho real que
+  `MemoryService`/`SquadServicer` usam em produção, dado `memory_dir: None`)
+  — não um diretório efêmero. Ator dedicado (`e2e-memory-agent`) evita
+  colisão; **sem cleanup no fim da suíte** (tentei via `rmSync` no handler
+  de saída do processo, mas a limpeza não é confiável — o `cargo run` filho
+  pode não terminar a tempo do sinal de saída do próprio script Node
+  chegar). Aceitável: esse arquivo JÁ acumula dados reais entre execuções
+  hoje (o teste do squad real chama um orquestrador de verdade, que grava
+  via `remember_decision` no MESMO arquivo) — `.forge/` é gitignored, e
+  `writeFileSync` (não `appendFileSync`) no seed é idempotente por execução,
+  o que basta para a asserção (que procura só o agente dedicado, nunca uma
+  contagem global).

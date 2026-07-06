@@ -8,12 +8,14 @@
 
 pub mod client;
 pub mod core_server;
+pub mod memory_client;
 pub mod service;
 pub mod squad_client;
 pub mod supervisor;
 
 pub use client::{SidecarClient, SidecarError};
 pub use core_server::{serve_core, CoreBackend, CoreServer};
-pub use service::{SidecarService, SquadLease, SquadPool};
+pub use memory_client::{MemoryClient, MemorySupervisor};
+pub use service::{MemoryService, SidecarService, SquadLease, SquadPool};
 pub use squad_client::{drain_stream, SquadClient, SquadRun, SquadSupervisor};
 pub use supervisor::SidecarSupervisor;

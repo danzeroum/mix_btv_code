@@ -11,6 +11,7 @@ const ADMIN_SURFACE_SCREENS = new Set([
   'telemetria',
   'mcp',
   'modelos',
+  'memoria',
   'ledger',
   'verify',
   'providers',

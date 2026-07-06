@@ -91,6 +91,26 @@ writeFileSync(
     `[[server]]\nid = "morto"\ncommand = "/caminho/que/nao/existe/forge-mcp-x"\nargs = []\n`,
 )
 
+// 3e. corpus de memória do squad (Fase 7 Onda 8, A3) — semeado DIRETO no
+// mesmo caminho relativo que `MemorySupervisor`/`SquadServicer` já usam em
+// produção (`<python_workspace_dir>/.forge/squad-memory/agent_memories.jsonl`,
+// já que `MemoryService` é construído com `memory_dir: None` — a mesma
+// resolução do squad real, ver doc de `MemorySupervisor::spawn`). Um agente
+// dedicado (e2e-memory-agent) evita colidir com o que já exista aí — e algo
+// JÁ existe: o teste do squad real (`squad-real-backend.spec.ts`) roda um
+// orquestrador de verdade, que chama `remember_decision` nesse MESMO
+// arquivo. Não há cleanup: esse arquivo já persiste entre execuções hoje
+// (`.forge/` é gitignored, então não afeta commits) — sobrescrever com
+// `writeFileSync` (não `appendFileSync`) é idempotente por execução, o que
+// basta.
+const memoryCorpusDir = join(repoRoot, 'python', '.forge', 'squad-memory')
+mkdirSync(memoryCorpusDir, { recursive: true })
+const memoryCorpusPath = join(memoryCorpusDir, 'agent_memories.jsonl')
+writeFileSync(
+  memoryCorpusPath,
+  `{"timestamp":"2026-01-01T00:00:00Z","agent":"e2e-memory-agent","decision":{"summary":"plano de arquitetura do gateway aprovado"},"confidence":0.9}\n`,
+)
+
 // 4. sobe o dashboard real apontando pro build da SPA, servindo o evento semeado.
 // --manifest-path resolve o workspace a partir de workDir (cargo não muda o
 // cwd do processo filho); run_dashboard lê `.forge/telemetry.db` relativo ao
