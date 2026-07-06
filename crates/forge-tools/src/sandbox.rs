@@ -178,6 +178,10 @@ impl Sandbox {
             cmd: Some(cmd.to_vec()),
             working_dir: Some("/work".to_string()),
             env: Some(env_vec),
+            // Roda como o dono do mount: com `cap_drop ALL` o root do contêiner
+            // não tem CAP_DAC_OVERRIDE, então só o dono escreve em /work. Rodar
+            // não-root é também melhor postura de contenção.
+            user: mount_user(&self.mount),
             host_config: Some(host_config),
             ..Default::default()
         };
@@ -275,6 +279,22 @@ async fn remove_quiet(docker: &bollard::Docker, id: &str) {
             }),
         )
         .await;
+}
+
+/// `uid:gid` do dono do mount, para o processo confinado poder escrever em
+/// `/work` mesmo sob `cap_drop ALL` (sem CAP_DAC_OVERRIDE o root do contêiner
+/// não escreve num mount de outro dono). `None` fora do Unix → dono default.
+#[cfg(unix)]
+fn mount_user(mount: &std::path::Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(mount)
+        .ok()
+        .map(|m| format!("{}:{}", m.uid(), m.gid()))
+}
+
+#[cfg(not(unix))]
+fn mount_user(_mount: &std::path::Path) -> Option<String> {
+    None
 }
 
 #[cfg(test)]
