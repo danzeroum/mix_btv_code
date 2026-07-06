@@ -1,0 +1,13 @@
+# ESQUELETO (Fase 6 Onda 8) — NÃO É CONFIGURAÇÃO DE PRODUÇÃO.
+#
+# O Forge é local-first; sem alvo de deploy hospedado hoje. Ponto de partida
+# honesto para quando houver um (ver infra/README.md). O playbook não configura
+# host real — a única task é um placeholder explícito, para não virar decoração.
+---
+- name: Provisionar host do Forge (esqueleto)
+  hosts: forge
+  become: true
+  tasks:
+    - name: Placeholder — definir os passos reais quando houver um alvo de deploy
+      ansible.builtin.debug:
+        msg: "esqueleto de configuração — ver infra/README.md; sem alvo real ainda"

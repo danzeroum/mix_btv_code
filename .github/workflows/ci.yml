@@ -125,3 +125,31 @@ jobs:
       - run: cargo bench -p forge-schemas --bench canonical -- --warm-up-time 0.5 --measurement-time 1
       - run: cargo bench -p forge-core --bench compaction -- --warm-up-time 0.5 --measurement-time 1
       - run: cargo bench -p forge-llm --bench gateway -- --warm-up-time 0.5 --measurement-time 1
+
+  # Load-test k6 do caminho do gateway (Fase 6 Onda 8b, critério de conclusão
+  # nº 3): sobe o endpoint de carga (`loadgen`, que embrulha o ScriptedGenerator
+  # — sem key real), martela com k6 e valida o P95 sob o limiar. O threshold vive
+  # no script (`p(95)<100`); o k6 sai ≠0 se estourar — o gate é REAL, não
+  # decorativo. Job separado (precisa do binário de pé + k6 instalado), não
+  # arrisca o gate `rust`.
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: grafana/setup-k6-action@v1
+      - name: Sobe o endpoint de carga e espera ficar pronto
+        run: |
+          cargo build -p forge-server --bin loadgen
+          ./target/debug/loadgen &
+          echo $! > loadgen.pid
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:7900/health && break
+            sleep 1
+          done
+      - name: Roda o k6 (valida o P95 — sai ≠0 se o threshold estourar)
+        run: k6 run infra/k6/gateway_load.js
+      - name: Encerra o endpoint de carga
+        if: always()
+        run: kill "$(cat loadgen.pid)" 2>/dev/null || true

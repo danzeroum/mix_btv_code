@@ -214,3 +214,38 @@
 - **[nota] `criterion` é dep pesada** (traz plotters p/ html_reports), mas só como
   **dev-dependency** — não entra no binário `forge`. Verifiquei que passa no
   `cargo deny` local? — a conferir no CI (job `deny`) como as outras deps pesadas.
+  **Resolvido:** passou no `deny` da PR #18 (merge 4edbeb4).
+- **[nota] job `bench` do CI falhou na 1ª tentativa** e foi corrigido: `cargo
+  bench` sem `--bench` também roda os unittests/testes de integração sob o libtest,
+  que rejeita as flags do criterion (`--warm-up-time`). Fix: targetar cada
+  `--bench` (commit 1c4a241). Lição para o futuro: bench job sempre com `--bench`
+  explícito.
+
+## Onda 8 — parte 2 (k6 + infra)
+
+- **[decisão] Endpoint de carga é um `[[bin]]` do `forge-server` (`loadgen`).** O
+  k6 precisa de um alvo HTTP; `forge-server` já tem axum. O bin embrulha o
+  `ScriptedGenerator` (sem key) e expõe `POST /generate` + `GET /health`, escutando
+  só em `127.0.0.1`. Adicionei `forge-llm` às deps do `forge-server` **só para o
+  bin** (a lib do dashboard não usa) — pequeno acoplamento, documentado no
+  Cargo.toml. Alternativa (crate dedicado `forge-loadgen`) ficou como opção; o bin
+  foi o mínimo que reusa o axum existente.
+- **[decisão] O que o k6 mede = overhead do NOSSO lado, não latência de rede.** O
+  `ScriptedGenerator` responde in-process sem provider. Então o P95 medido é o
+  custo do caminho (axum + agregação + streaming) sob concorrência — que é
+  justamente o que se quer garantir (regressão/contenção nossa, ex.: lock do rate
+  limiter). **Honesto:** não é o P95 de uma chamada real de LLM (isso dependeria de
+  rede/provider); é o P95 do gateway sem a rede. Documentado no script e no
+  README. Provado local (hammer concorrente: p95 ~15ms, bem sob o limiar de 100ms).
+- **[decisão] Threshold `p(95)<100ms` no script k6.** Generoso para não ser flaky
+  num runner de CI, apertado para pegar regressão grosseira. O k6 sai ≠0 se
+  estourar — o gate é real (mesma postura anti-decorativo do sandbox/LSP). Job `k6`
+  separado no CI: instala k6 (`grafana/setup-k6-action`), sobe o `loadgen`, espera
+  o `/health`, roda o script. **Não pude rodar o k6 local** (não instalado); validei
+  o endpoint + a viabilidade do threshold com um hammer Python concorrente.
+- **[decisão] `infra/` é esqueleto honesto, não terraform decorativo.** O produto é
+  local-first (só `127.0.0.1`, sem Dockerfile/cloud), então **não há alvo de deploy
+  real**. Entreguei `infra/README.md` (estado honesto), `terraform/main.tf` e
+  `ansible/playbook.yml` como **esqueletos marcados** (providers/recursos
+  comentados até haver alvo) + o `k6/` que é o único artefato executado. É a "Nota
+  honesta" da Onda 8 do PLANO exercida: esqueleto marcado > decoração.

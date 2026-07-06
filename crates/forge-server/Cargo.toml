@@ -8,11 +8,20 @@ description = "API local e dashboard de métricas da plataforma Forge (axum) —
 [dependencies]
 forge-store.workspace = true
 forge-verify.workspace = true
+# forge-llm é usado só pelo bin `loadgen` (o alvo do load-test do k6, que embrulha
+# o ScriptedGenerator sem key real) — não pela lib do dashboard.
+forge-llm.workspace = true
 axum.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tower-http.workspace = true
+
+# Endpoint de carga (Fase 6 Onda 8b): o alvo HTTP do load-test do k6. Não é
+# produto — é o análogo do fixture MCP, mas para medir o P95 do gateway.
+[[bin]]
+name = "loadgen"
+path = "src/bin/loadgen.rs"
 
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
