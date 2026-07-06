@@ -51,6 +51,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["fs"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 axum = "0.8"
+bollard = "0.17"
 
 forge-schemas = { path = "crates/forge-schemas" }
 forge-core = { path = "crates/forge-core" }

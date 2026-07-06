@@ -25,6 +25,13 @@ impl ToolRegistry {
         }
     }
 
+    /// Registra uma ferramenta adicional no conjunto (ex.: uma skill vetada
+    /// carregada em runtime, Fase 6 Onda 1). O ponto de extensão que a
+    /// Fase 6 abre sobre o `Vec<Box<dyn Tool>>` — MCP (Onda 4) usa o mesmo.
+    pub fn register(&mut self, tool: Box<dyn Tool>) {
+        self.tools.push(tool);
+    }
+
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
         self.tools
             .iter()
@@ -49,5 +56,17 @@ mod tests {
             assert!(reg.get(name).is_some(), "{name}");
         }
         assert!(reg.get("inexistente").is_none());
+    }
+
+    #[test]
+    fn register_adiciona_tool_e_get_encontra() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut reg = ToolRegistry::default_set(dir.path());
+        assert!(reg.get("skill-x").is_none());
+        let skill = crate::skill::SkillTool::new("skill-x", "d", "true", dir.path().to_path_buf());
+        reg.register(Box::new(skill));
+        assert!(reg.get("skill-x").is_some());
+        // As quatro built-in continuam presentes após o register.
+        assert!(reg.get("bash").is_some());
     }
 }

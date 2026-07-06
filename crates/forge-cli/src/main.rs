@@ -9,6 +9,7 @@ mod cache;
 mod rate_limit_gen;
 mod session;
 mod sidecar;
+mod skills;
 mod squad;
 mod tui_app;
 
@@ -426,7 +427,7 @@ async fn run_once<G: Generator>(
     root: &std::path::Path,
     task: String,
 ) -> Result<()> {
-    let tools = ToolRegistry::default_set(root);
+    let tools = crate::skills::build_registry(root);
     let agent_loop = build_loop(generator, opts, &tools)?;
     let mut session = session::Session::open(root, &task, &opts.model)?;
     let mut durable = open_durable(root, opts, &task)?;
@@ -479,7 +480,7 @@ async fn chat_repl<G: Generator>(
     opts: &RunOpts,
     root: &std::path::Path,
 ) -> Result<()> {
-    let tools = ToolRegistry::default_set(root);
+    let tools = crate::skills::build_registry(root);
     let agent_loop = build_loop(generator, opts, &tools)?;
     let mut session = session::Session::open(root, "<chat>", &opts.model)?;
     let mut resolver = CliResolver { auto_yes: opts.yes };

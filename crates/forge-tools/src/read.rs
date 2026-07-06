@@ -13,11 +13,11 @@ pub struct ReadTool {
 const DEFAULT_LINE_LIMIT: usize = 2000;
 
 impl Tool for ReadTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "read"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Lê um arquivo texto do workspace, com números de linha. Use offset/limit para arquivos grandes."
     }
 

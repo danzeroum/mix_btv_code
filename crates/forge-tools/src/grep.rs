@@ -21,11 +21,11 @@ pub struct GrepTool {
 const MAX_MATCHES: usize = 200;
 
 impl Tool for GrepTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "grep"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Busca um padrão (regex) nos arquivos do workspace, respeitando .gitignore. Retorna caminho:linha:conteúdo."
     }
 

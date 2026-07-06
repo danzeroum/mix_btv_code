@@ -78,3 +78,21 @@ jobs:
         with:
           name: verification-evidence
           path: verification-evidence.json
+
+  # Contenção do sandbox Docker (Fase 6 Onda 2): os quatro vetores (escrita
+  # fora do mount, rede proibida, timeout, memória) exigem um daemon Docker (o
+  # runner ubuntu tem) e são `#[ignore]` no `cargo test` normal — aparecem como
+  # "ignored", nunca verdes por engano. Aqui rodam DE VERDADE com
+  # `--include-ignored`. O helper `daemon_obrigatorio` FALHA se o daemon não
+  # responder — um teste de contenção que "passa" sem containerizar nada seria
+  # um falso positivo catastrófico. Job separado (precisa do daemon + pull da
+  # imagem), não arrisca o gate `rust`.
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Confirma que o daemon responde antes — o teste depende dele de propósito.
+      - run: docker version
+      - run: cargo test -p forge-tools -- --include-ignored

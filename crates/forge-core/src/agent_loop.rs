@@ -551,4 +551,108 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, LoopError::MaxSteps(5)));
     }
+
+    /// Fronteira nº 1 da Onda 1 (Fase 6): o fio completo — registry → permissão
+    /// → run → output — com uma skill registrada que **executa de verdade** como
+    /// subprocesso e cujo stdout real volta ao loop. Não é unit do wrapper.
+    #[tokio::test]
+    async fn skill_registrada_e_invocada_de_verdade_pelo_loop() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("greet");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill = forge_tools::SkillTool::new(
+            "greet",
+            "cumprimenta",
+            r#"printf 'OLA:%s' "$1""#,
+            skill_dir,
+        );
+        let mut tools = ToolRegistry::default_set(dir.path());
+        tools.register(Box::new(skill));
+
+        let gen = Scripted {
+            turns: Mutex::new(vec![
+                turn(
+                    vec![ContentBlock::ToolUse {
+                        id: "tu1".into(),
+                        name: "greet".into(),
+                        input: serde_json::json!({"input": "mundo"}),
+                    }],
+                    StopReason::ToolUse,
+                ),
+                turn(
+                    vec![ContentBlock::Text {
+                        text: "feito".into(),
+                    }],
+                    StopReason::EndTurn,
+                ),
+            ]),
+        };
+
+        let al = agent_loop(&gen, &tools);
+        let outcome = al
+            .run("use a skill", &mut AllowAll, &mut |_| {})
+            .await
+            .unwrap();
+
+        // A skill executou de verdade: seu stdout real voltou como tool_result.
+        let tool_result = match &outcome.messages[2].content[0] {
+            ContentBlock::ToolResult {
+                content, is_error, ..
+            } => {
+                assert!(!is_error);
+                content.clone()
+            }
+            other => panic!("esperava ToolResult, achei {other:?}"),
+        };
+        assert_eq!(tool_result, "OLA:mundo");
+    }
+
+    /// Fronteira nº 4 da Onda 1: a invocação da skill passa pelo permission-
+    /// engine; um resolver que nega emite `ToolDenied` e a skill **não** roda —
+    /// provado por um entrypoint que criaria um arquivo se tivesse executado.
+    #[tokio::test]
+    async fn skill_negada_pela_permissao_nao_executa() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("toca");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let marca = dir.path().join("EXECUTOU");
+        let entry = format!(r#"touch "{}""#, marca.display());
+        let skill = forge_tools::SkillTool::new("toca", "cria arquivo", entry, skill_dir);
+        let mut tools = ToolRegistry::default_set(dir.path());
+        tools.register(Box::new(skill));
+
+        let gen = Scripted {
+            turns: Mutex::new(vec![
+                turn(
+                    vec![ContentBlock::ToolUse {
+                        id: "tu1".into(),
+                        name: "toca".into(),
+                        input: serde_json::json!({"input": ""}),
+                    }],
+                    StopReason::ToolUse,
+                ),
+                turn(
+                    vec![ContentBlock::Text { text: "ok".into() }],
+                    StopReason::EndTurn,
+                ),
+            ]),
+        };
+
+        let al = agent_loop(&gen, &tools);
+        let mut denied = false;
+        let _ = al
+            .run("tarefa", &mut DenyAll, &mut |e| {
+                if matches!(e, LoopEvent::ToolDenied { .. }) {
+                    denied = true;
+                }
+            })
+            .await
+            .unwrap();
+
+        assert!(denied, "a permissão deveria ter negado a skill");
+        assert!(
+            !marca.exists(),
+            "a skill negada não pode ter executado o entrypoint"
+        );
+    }
 }

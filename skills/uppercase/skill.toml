@@ -1,0 +1,8 @@
+# Skill built-in de exemplo (Fase 6 Onda 1).
+name = "uppercase"
+description = "Converte o texto recebido em `input` para maiúsculas."
+
+# `$1` = valor de `input`; roda no diretório da skill via `sh -c`.
+entrypoint = 'printf "%s" "$1" | tr "[:lower:]" "[:upper:]"'
+
+permissions = []

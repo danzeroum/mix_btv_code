@@ -20,7 +20,7 @@ use crossterm::terminal::{
 use forge_core::{LoopEvent, PermissionResolver};
 use forge_llm::chat::ChatMessage;
 use forge_llm::Generator;
-use forge_tools::{DiffLine, ToolRegistry};
+use forge_tools::DiffLine;
 use forge_tui::{DiffKind, Item, PermissionPrompt, TuiState};
 use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
@@ -175,7 +175,7 @@ pub async fn run_tui<G: Generator + Send + Sync + 'static>(
     let agent_root = root.clone();
     let agent = tokio::spawn(async move {
         let run = async {
-            let tools = ToolRegistry::default_set(&agent_root);
+            let tools = crate::skills::build_registry(&agent_root);
             let mut ledger = Session::open(&agent_root, "<tui>", &agent_opts.model)?;
             let mut durable = open_durable(&agent_root, &agent_opts, "<tui>")?;
             if durable.resumed_messages() > 0 {
