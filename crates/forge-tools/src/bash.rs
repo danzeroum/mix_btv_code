@@ -16,11 +16,11 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 600_000;
 
 impl Tool for BashTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "bash"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Executa um comando shell (sh -c) na raiz do workspace e retorna stdout+stderr. Timeout padrão de 120s."
     }
 

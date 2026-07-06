@@ -10,11 +10,11 @@ pub struct EditTool {
 }
 
 impl Tool for EditTool {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "edit"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "Substitui uma ocorrência exata de old_string por new_string num arquivo. old_string deve ser única no arquivo."
     }
 

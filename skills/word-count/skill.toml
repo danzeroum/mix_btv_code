@@ -1,0 +1,12 @@
+# Skill built-in de exemplo (Fase 6 Onda 1).
+# Vetada pelo skill-vetter no carregamento, como qualquer skill.
+name = "word-count"
+description = "Conta as palavras do texto recebido em `input` e devolve o número."
+
+# O entrypoint roda via `sh -c` com o valor de `input` disponível como `$1`,
+# no diretório da própria skill. Puro shell — sem dependências externas.
+entrypoint = 'printf "%s" "$1" | wc -w | tr -d " "'
+
+# Permissões declaradas (a coerência com o código é checada pelo vetter).
+# Um entrypoint puramente shell, sem arquivos de código, não requer nenhuma.
+permissions = []

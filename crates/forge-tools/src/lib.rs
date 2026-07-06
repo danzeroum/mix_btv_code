@@ -10,9 +10,11 @@ pub mod edit;
 pub mod grep;
 pub mod read;
 pub mod registry;
+pub mod skill;
 
 pub use diff::{format_diff, line_diff, DiffLine};
 pub use registry::ToolRegistry;
+pub use skill::SkillTool;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,8 +46,8 @@ pub struct ToolOutput {
 /// Contrato de ferramenta: identidade estável, schema para o modelo,
 /// escopo para o motor de permissões e execução com args JSON.
 pub trait Tool: Send + Sync {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
     /// JSON Schema dos argumentos, anunciado ao modelo.
     fn input_schema(&self) -> Value;
     /// Escopo avaliado pelo motor de permissões (caminho, comando...).
