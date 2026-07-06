@@ -101,6 +101,38 @@ impl Sandbox {
         self.run_with(&docker, cmd, env).await
     }
 
+    /// Garante que a imagem está local, puxando-a **só se ausente** (via
+    /// `inspect_image`). bollard não faz pull no `create` — um sandbox de
+    /// terceiro precisa disto de verdade, e é o que faltava para os testes de
+    /// contenção rodarem no runner de CI (onde a imagem não vem pré-baixada).
+    async fn ensure_image(&self, docker: &bollard::Docker) -> Result<(), SandboxError> {
+        use bollard::image::CreateImageOptions;
+        use futures_util::StreamExt;
+
+        if docker.inspect_image(&self.image).await.is_ok() {
+            return Ok(());
+        }
+        let (from_image, tag) = match self.image.rsplit_once(':') {
+            Some((name, tag)) => (name.to_string(), tag.to_string()),
+            None => (self.image.clone(), "latest".to_string()),
+        };
+        let mut pull = docker.create_image(
+            Some(CreateImageOptions::<String> {
+                from_image,
+                tag,
+                ..Default::default()
+            }),
+            None,
+            None,
+        );
+        while let Some(item) = pull.next().await {
+            item.map_err(|e| {
+                SandboxError::Execution(format!("pull da imagem {}: {e}", self.image))
+            })?;
+        }
+        Ok(())
+    }
+
     /// Como `run`, mas contra um cliente já configurado — permite testar tanto
     /// a contenção (cliente com daemon real, no CI) quanto o caminho gracioso
     /// (cliente apontado a um socket inexistente).
@@ -119,6 +151,9 @@ impl Sandbox {
             .ping()
             .await
             .map_err(|e| SandboxError::DaemonUnavailable(e.to_string()))?;
+
+        // bollard não faz pull no `create` — garante a imagem localmente antes.
+        self.ensure_image(docker).await?;
 
         let env_vec: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
         let host_config = HostConfig {
