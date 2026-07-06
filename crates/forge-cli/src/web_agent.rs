@@ -912,16 +912,21 @@ pub fn merged_router(hub: SessionHub, dashboard: Router, extra: Router) -> Route
 /// desta onda e as de `extra` (squad, Onda 4; prompt-render, Onda 5) por
 /// trás da guarda de `Origin`/`Host`. `forge-server` em si segue intocado
 /// (zero dependência nova) — a composição mora aqui.
+// 8 argumentos = os handles/config que `main.rs` já mantém abertos (um por
+// storage) + o que a composição de routers pede — função só encaminha, não
+// teria o que uma struct de agrupamento ganhasse em clareza.
+#[allow(clippy::too_many_arguments)]
 pub async fn serve_with_agent(
     telemetry: forge_store::Telemetry,
     prompt_library: std::sync::Arc<std::sync::Mutex<forge_store::PromptLibrary>>,
+    ledger: std::sync::Arc<std::sync::Mutex<forge_store::LedgerStore>>,
     root: impl AsRef<std::path::Path>,
     addr: std::net::SocketAddr,
     web_dir: impl AsRef<std::path::Path>,
     hub: SessionHub,
     extra: Router,
 ) -> std::io::Result<()> {
-    let dashboard = forge_server::router(telemetry, prompt_library, root, web_dir);
+    let dashboard = forge_server::router(telemetry, prompt_library, ledger, root, web_dir);
     let app = merged_router(hub, dashboard, extra);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await

@@ -27,7 +27,14 @@ pub struct LedgerStore {
 
 impl LedgerStore {
     pub fn open(path: &str) -> Result<Self, LedgerError> {
-        Self::init(Connection::open(path)?)
+        let conn = Connection::open(path)?;
+        // CLI (`forge run`/`chat`/`squad`) e o dashboard web (rotas de
+        // permissão/squad) tocam `.forge/forge.db` ao mesmo tempo — sem WAL,
+        // isso é "database is locked" esperando pra acontecer (bug de
+        // concorrência latente, fechado só agora, Onda 6; mesmo padrão já
+        // usado por `EventStore`/`RuleStore::open`).
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        Self::init(conn)
     }
 
     pub fn open_in_memory() -> Result<Self, LedgerError> {
@@ -71,6 +78,34 @@ impl LedgerStore {
         Ok(entry)
     }
 
+    /// Lista as entradas mais recentes primeiro, opcionalmente filtradas por
+    /// um ator exato — mesmo padrão de paginação de `TelemetryStore::recent`.
+    /// `actor` não é coluna própria (mora dentro do `body` JSON), então o
+    /// filtro entra via `json_extract` na MESMA consulta que o `LIMIT`, não
+    /// depois em Rust — senão `?actor=X` devolveria menos que deveria toda
+    /// vez que outros atores aparecerem entre as N mais recentes.
+    pub fn recent(&self, limit: u32, actor: Option<&str>) -> Result<Vec<LedgerEntry>, LedgerError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, body FROM ledger
+             WHERE ?2 IS NULL OR json_extract(body, '$.actor') = ?2
+             ORDER BY seq DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit, actor], |row| {
+            Ok((row.get::<_, u64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, body) = row?;
+            // `body` carrega `seq: 0` (só é conhecido depois do INSERT em
+            // `append`, tarde demais pra entrar no JSON serializado) — a
+            // coluna é sempre quem manda no `seq` de verdade.
+            let mut entry: LedgerEntry = serde_json::from_str(&body)?;
+            entry.seq = seq;
+            out.push(entry);
+        }
+        Ok(out)
+    }
+
     /// Percorre a cadeia inteira validando os hashes encadeados.
     pub fn verify_chain(&self) -> Result<u64, LedgerError> {
         let mut stmt = self
@@ -111,12 +146,16 @@ mod tests {
     use serde_json::json;
 
     fn entry(kind: &str) -> LedgerEntry {
+        entry_with_actor(kind, "test")
+    }
+
+    fn entry_with_actor(kind: &str, actor: &str) -> LedgerEntry {
         LedgerEntry {
             seq: 0,
             prev_hash: String::new(),
             entry_hash: String::new(),
             kind: kind.into(),
-            actor: "test".into(),
+            actor: actor.into(),
             payload: json!({"n": 1}),
             r#override: None,
             fake_marker: None,
@@ -195,5 +234,68 @@ mod tests {
             certification_payload["evidence_hash"]
         );
         assert_eq!(store.verify_chain().unwrap(), 2);
+    }
+
+    /// Fronteira da Onda 6: `recent` devolve exatamente as N mais recentes,
+    /// mais nova primeiro, com `seq`/hashes batendo por igualdade com o que
+    /// `append` de fato gravou (não um dump reformatado).
+    #[test]
+    fn recent_lista_mais_recentes_primeiro_e_respeita_limit() {
+        let mut store = LedgerStore::open_in_memory().unwrap();
+        let a = store.append(entry("session.start")).unwrap();
+        let b = store.append(entry("tool.run")).unwrap();
+        let c = store.append(entry("tool.result")).unwrap();
+
+        let last_two = store.recent(2, None).unwrap();
+        assert_eq!(last_two.len(), 2);
+        assert_eq!(last_two[0].seq, c.seq);
+        assert_eq!(last_two[0].entry_hash, c.entry_hash);
+        assert_eq!(last_two[0].prev_hash, c.prev_hash);
+        assert_eq!(last_two[1].seq, b.seq);
+        // `a` não aparece — respeitou o limite de 2.
+        assert!(last_two.iter().all(|e| e.seq != a.seq));
+    }
+
+    /// O filtro por ator precisa combinar com o LIMIT na MESMA consulta —
+    /// se filtrasse só depois de truncar para as N mais recentes, um ator
+    /// raro nas últimas N aparições sumiria mesmo tendo entradas de verdade.
+    #[test]
+    fn recent_filtra_por_actor_combinado_com_o_limit() {
+        let mut store = LedgerStore::open_in_memory().unwrap();
+        let raro = store
+            .append(entry_with_actor("user.turn", "humano"))
+            .unwrap();
+        for _ in 0..5 {
+            store.append(entry_with_actor("llm.turn", "build")).unwrap();
+        }
+
+        // Sem filtro, um LIMIT 3 não veria a entrada de "humano" (é a mais antiga).
+        let sem_filtro = store.recent(3, None).unwrap();
+        assert!(sem_filtro.iter().all(|e| e.actor != "humano"));
+
+        // Com filtro, mesmo um LIMIT pequeno encontra a entrada certa.
+        let filtrado = store.recent(3, Some("humano")).unwrap();
+        assert_eq!(filtrado.len(), 1);
+        assert_eq!(filtrado[0].seq, raro.seq);
+        assert_eq!(filtrado[0].actor, "humano");
+
+        let inexistente = store.recent(50, Some("ninguem")).unwrap();
+        assert!(inexistente.is_empty());
+    }
+
+    /// Onda 6: `LedgerStore::open` liga WAL (bug de concorrência latente,
+    /// exposto quando CLI e dashboard web tocam `.forge/forge.db` juntos).
+    /// `open_in_memory` (usado pelo resto destes testes) não suporta WAL —
+    /// por isso este teste, especificamente, abre um arquivo real.
+    #[test]
+    fn open_liga_wal_no_arquivo_real() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forge.db");
+        let store = LedgerStore::open(path.to_str().unwrap()).unwrap();
+        let mode: String = store
+            .conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
     }
 }

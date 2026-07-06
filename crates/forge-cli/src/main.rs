@@ -265,6 +265,15 @@ async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
                 .to_str()
                 .unwrap_or(".forge/prompt_library.db"),
         )?));
+    // Mesmo ledger (`.forge/forge.db`) que `session.rs`/`squad_agent.rs` já
+    // gravam — a tela só lê o que a CLI/squad já registraram, não uma
+    // segunda cadeia (Fase 7 Onda 6).
+    let ledger = std::sync::Arc::new(std::sync::Mutex::new(forge_store::LedgerStore::open(
+        forge_dir
+            .join("forge.db")
+            .to_str()
+            .unwrap_or(".forge/forge.db"),
+    )?));
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let web_dir = forge_server::default_web_dir();
     if web_agent {
@@ -282,6 +291,7 @@ async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
         web_agent::serve_with_agent(
             telemetry,
             prompt_library,
+            ledger,
             &root,
             addr,
             web_dir,
@@ -294,7 +304,7 @@ async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
             "forge dashboard — http://{addr} (assets: {})",
             web_dir.display()
         );
-        forge_server::serve(telemetry, prompt_library, &root, addr, web_dir).await?;
+        forge_server::serve(telemetry, prompt_library, ledger, &root, addr, web_dir).await?;
     }
     Ok(())
 }

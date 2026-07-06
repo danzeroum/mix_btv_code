@@ -858,6 +858,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "forge-llm",
+ "forge-schemas",
  "forge-store",
  "forge-verify",
  "serde",

@@ -21,7 +21,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use forge_store::{PromptLibrary, Telemetry};
+use forge_store::{LedgerStore, PromptLibrary, Telemetry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::net::SocketAddr;
@@ -35,6 +35,7 @@ use tower_http::services::{ServeDir, ServeFile};
 struct AppState {
     telemetry: Telemetry,
     prompt_library: Arc<Mutex<PromptLibrary>>,
+    ledger: Arc<Mutex<LedgerStore>>,
     /// Raiz do workspace — para enumerar/vetar skills em `/api/skills`.
     root: PathBuf,
 }
@@ -65,6 +66,7 @@ impl ErrorBody {
 pub fn router(
     telemetry: Telemetry,
     prompt_library: Arc<Mutex<PromptLibrary>>,
+    ledger: Arc<Mutex<LedgerStore>>,
     root: impl AsRef<Path>,
     web_dir: impl AsRef<Path>,
 ) -> Router {
@@ -81,10 +83,13 @@ pub fn router(
         .route("/api/prompts", get(list_prompts).post(create_prompt))
         .route("/api/prompts/{id}/favorite", post(favorite_prompt))
         .route("/api/prompts/{id}", axum::routing::delete(delete_prompt))
+        .route("/api/ledger", get(list_ledger))
+        .route("/api/ledger/verify", post(verify_ledger))
         .fallback_service(serve_dir)
         .with_state(AppState {
             telemetry,
             prompt_library,
+            ledger,
             root: root.as_ref().to_path_buf(),
         })
         .layer(middleware::from_fn(require_local_origin))
@@ -94,12 +99,17 @@ pub fn router(
 pub async fn serve(
     telemetry: Telemetry,
     prompt_library: Arc<Mutex<PromptLibrary>>,
+    ledger: Arc<Mutex<LedgerStore>>,
     root: impl AsRef<Path>,
     addr: SocketAddr,
     web_dir: impl AsRef<Path>,
 ) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router(telemetry, prompt_library, root, web_dir)).await
+    axum::serve(
+        listener,
+        router(telemetry, prompt_library, ledger, root, web_dir),
+    )
+    .await
 }
 
 /// Resolve o diretório da SPA por precedência: `FORGE_WEB_DIR` → `web/dist`
@@ -286,6 +296,56 @@ async fn delete_prompt(State(state): State<AppState>, AxumPath(id): AxumPath<i64
     }
 }
 
+#[derive(Deserialize)]
+struct LedgerQuery {
+    limit: Option<u32>,
+    actor: Option<String>,
+}
+
+/// `GET /api/ledger?limit=&actor=` — entradas mais recentes primeiro, mesmo
+/// `.forge/forge.db` que a CLI grava via `LedgerStore::append`. O filtro por
+/// `actor` é resolvido dentro de `LedgerStore::recent` (SQL, combinado com o
+/// `LIMIT`), não aqui.
+async fn list_ledger(State(state): State<AppState>, Query(q): Query<LedgerQuery>) -> Response {
+    let ledger = state.ledger.lock().unwrap_or_else(|e| e.into_inner());
+    match ledger.recent(q.limit.unwrap_or(50), q.actor.as_deref()) {
+        Ok(entries) => Json(entries).into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+#[derive(Serialize)]
+struct VerifyResponse {
+    ok: bool,
+    verified: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// `POST /api/ledger/verify` — percorre a cadeia inteira. Uma corrupção é
+/// sinalizada por `ok:false` no corpo, não por um status HTTP de erro: a
+/// requisição em si teve sucesso, o que ela relata é que o *dado* está
+/// corrompido — a distinção que a tela precisa pra diferenciar "servidor
+/// falhou" de "alguém adulterou o ledger".
+async fn verify_ledger(State(state): State<AppState>) -> Response {
+    let ledger = state.ledger.lock().unwrap_or_else(|e| e.into_inner());
+    match ledger.verify_chain() {
+        Ok(verified) => Json(VerifyResponse {
+            ok: true,
+            verified,
+            error: None,
+        })
+        .into_response(),
+        Err(forge_store::ledger::LedgerError::BrokenChain { seq, .. }) => Json(VerifyResponse {
+            ok: false,
+            verified: seq.saturating_sub(1),
+            error: Some(format!("cadeia corrompida na seq {seq}")),
+        })
+        .into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +366,10 @@ mod tests {
 
     fn prompt_library_vazia() -> Arc<Mutex<PromptLibrary>> {
         Arc::new(Mutex::new(PromptLibrary::open_in_memory().unwrap()))
+    }
+
+    fn ledger_vazio() -> Arc<Mutex<LedgerStore>> {
+        Arc::new(Mutex::new(LedgerStore::open_in_memory().unwrap()))
     }
 
     /// Fixture de `web/dist` com estrutura aninhada (não só um `index.html`
@@ -344,6 +408,7 @@ mod tests {
         let app = router(
             telemetry_com_um_evento(),
             prompt_library_vazia(),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -372,6 +437,7 @@ mod tests {
         let app = router(
             telemetry,
             prompt_library_vazia(),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -398,6 +464,7 @@ mod tests {
         let app = router(
             Telemetry::open_in_memory().unwrap(),
             prompt_library_vazia(),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -414,6 +481,7 @@ mod tests {
         let app = router(
             Telemetry::open_in_memory().unwrap(),
             prompt_library_vazia(),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -435,6 +503,7 @@ mod tests {
         let app = router(
             Telemetry::open_in_memory().unwrap(),
             prompt_library_vazia(),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -471,6 +540,7 @@ mod tests {
         let app = router(
             Telemetry::open_in_memory().unwrap(),
             prompt_library_vazia(),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -522,6 +592,7 @@ mod tests {
         let app = router(
             Telemetry::open_in_memory().unwrap(),
             prompt_library_vazia(),
+            ledger_vazio(),
             root.path(),
             web_dir.path(),
         );
@@ -563,6 +634,7 @@ mod tests {
         let app = router(
             Telemetry::open_in_memory().unwrap(),
             Arc::clone(&library),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -699,6 +771,7 @@ mod tests {
         let app = router(
             Telemetry::open_in_memory().unwrap(),
             prompt_library_vazia(),
+            ledger_vazio(),
             web_dir.path(),
             web_dir.path(),
         );
@@ -735,5 +808,147 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    fn entry_ledger(kind: &str, actor: &str) -> forge_schemas::ledger::LedgerEntry {
+        forge_schemas::ledger::LedgerEntry {
+            seq: 0,
+            prev_hash: String::new(),
+            entry_hash: String::new(),
+            kind: kind.into(),
+            actor: actor.into(),
+            payload: serde_json::json!({}),
+            r#override: None,
+            fake_marker: None,
+            ts: "2026-07-05T00:00:00Z".into(),
+        }
+    }
+
+    /// Fronteira da Onda 6: `GET /api/ledger` devolve exatamente o que
+    /// `LedgerStore::append` gravou por fora da rota — `seq`/hashes por
+    /// igualdade, mais nova primeiro (mesmo contrato que `LedgerStore::recent`
+    /// já prova em `forge-store`, agora atravessando o HTTP de verdade).
+    #[tokio::test]
+    async fn ledger_lista_o_que_foi_semeado_por_fora_da_rota() {
+        let mut store = LedgerStore::open_in_memory().unwrap();
+        let a = store
+            .append(entry_ledger("session.start", "humano"))
+            .unwrap();
+        let b = store.append(entry_ledger("tool.run", "build")).unwrap();
+        let c = store.append(entry_ledger("tool.run", "build")).unwrap();
+        let ledger = Arc::new(Mutex::new(store));
+
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            ledger,
+            web_dir.path(),
+            web_dir.path(),
+        );
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ledger")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let listed: Vec<forge_schemas::ledger::LedgerEntry> =
+            serde_json::from_slice(&body).unwrap();
+        assert_eq!(listed.len(), 3);
+        assert_eq!(listed[0].seq, c.seq);
+        assert_eq!(listed[0].entry_hash, c.entry_hash);
+        assert_eq!(listed[0].prev_hash, c.prev_hash);
+        assert_eq!(listed[1].seq, b.seq);
+        assert_eq!(listed[2].seq, a.seq);
+    }
+
+    /// `?actor=` filtra combinado com o `LIMIT` — mesma garantia que
+    /// `LedgerStore::recent` já prova isoladamente, agora pelo HTTP: um
+    /// limite pequeno ainda encontra o ator raro fora da janela recente.
+    #[tokio::test]
+    async fn ledger_filtra_por_actor_via_query_param() {
+        let mut store = LedgerStore::open_in_memory().unwrap();
+        let raro = store.append(entry_ledger("user.turn", "humano")).unwrap();
+        for _ in 0..3 {
+            store.append(entry_ledger("llm.turn", "build")).unwrap();
+        }
+        let ledger = Arc::new(Mutex::new(store));
+
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            ledger,
+            web_dir.path(),
+            web_dir.path(),
+        );
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ledger?actor=humano&limit=2")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let listed: Vec<forge_schemas::ledger::LedgerEntry> =
+            serde_json::from_slice(&body).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].seq, raro.seq);
+        assert_eq!(listed[0].actor, "humano");
+    }
+
+    /// `POST /api/ledger/verify` sobre uma cadeia íntegra devolve
+    /// `{ok:true, verified:N}` — o contrato exato que a tela consome para
+    /// distinguir "verificado" de "corrompido" sem depender de status HTTP.
+    #[tokio::test]
+    async fn ledger_verify_devolve_ok_true_e_contagem() {
+        let mut store = LedgerStore::open_in_memory().unwrap();
+        store
+            .append(entry_ledger("session.start", "humano"))
+            .unwrap();
+        store.append(entry_ledger("tool.run", "build")).unwrap();
+        let ledger = Arc::new(Mutex::new(store));
+
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            ledger,
+            web_dir.path(),
+            web_dir.path(),
+        );
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ledger/verify")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["verified"], 2);
+        assert!(json.get("error").is_none());
     }
 }
