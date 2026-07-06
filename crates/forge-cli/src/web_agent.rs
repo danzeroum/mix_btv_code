@@ -896,9 +896,10 @@ pub fn router(hub: SessionHub) -> Router {
 }
 
 /// Compõe o router do agente web com o `forge_server::router()` existente,
-/// qualquer router aditivo de outra onda (`extra` — ex.: `squad_agent::router`,
-/// Onda 4) e a guarda de `Origin`/`Host` — `forge-server` continua sem
-/// ganhar dependência nenhuma de `forge-core`/`forge-tools`.
+/// um router aditivo (`extra` — squad (Onda 4) / prompt-render (Onda 5) /
+/// o que mais precisar de `forge-sidecar`/`forge-tools`/`forge-core`,
+/// indisponíveis em `forge-server`) e a guarda de `Origin`/`Host` —
+/// `forge-server` continua sem ganhar dependência nenhuma dos três.
 pub fn merged_router(hub: SessionHub, dashboard: Router, extra: Router) -> Router {
     dashboard
         .merge(router(hub))
@@ -908,18 +909,19 @@ pub fn merged_router(hub: SessionHub, dashboard: Router, extra: Router) -> Route
 
 /// Sobe o dashboard com o agente web habilitado (`--web-agent`, opt-in até o
 /// fecho da fase) — mesma SPA/telemetria do dashboard padrão, mais as rotas
-/// desta onda e `extra` (Onda 4: squad) por trás da guarda de `Origin`/
-/// `Host`. `forge-server` em si segue intocado (zero dependência nova) — a
-/// composição mora aqui.
+/// desta onda e as de `extra` (squad, Onda 4; prompt-render, Onda 5) por
+/// trás da guarda de `Origin`/`Host`. `forge-server` em si segue intocado
+/// (zero dependência nova) — a composição mora aqui.
 pub async fn serve_with_agent(
     telemetry: forge_store::Telemetry,
+    prompt_library: std::sync::Arc<std::sync::Mutex<forge_store::PromptLibrary>>,
     root: impl AsRef<std::path::Path>,
     addr: std::net::SocketAddr,
     web_dir: impl AsRef<std::path::Path>,
     hub: SessionHub,
     extra: Router,
 ) -> std::io::Result<()> {
-    let dashboard = forge_server::router(telemetry, root, web_dir);
+    let dashboard = forge_server::router(telemetry, prompt_library, root, web_dir);
     let app = merged_router(hub, dashboard, extra);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await

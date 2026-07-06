@@ -31,19 +31,6 @@ export interface ModelTier {
   label: string
 }
 
-export interface PromptGenerator {
-  id: string
-  name: string
-}
-
-export interface SavedPrompt {
-  id: string
-  name: string
-  favorite: boolean
-  generator: string
-  tags: string[]
-}
-
 export interface LedgerEntry {
   seq: number
   ts: string

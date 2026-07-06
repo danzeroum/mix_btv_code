@@ -6,6 +6,7 @@
 //! `squad` ativa o sidecar Python na Fase 4; `verify` completa na Fase 5.
 
 mod cache;
+mod prompt_render;
 mod rate_limit_gen;
 mod session;
 mod sidecar;
@@ -253,6 +254,17 @@ async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
             .to_str()
             .unwrap_or(".forge/telemetry.db"),
     )?;
+    // Mesmo arquivo (`.forge/prompt_library.db`) que `/prompt save|library|...`
+    // do chat REPL já usa — não uma segunda biblioteca de prompts. Aberta uma
+    // vez aqui (não por requisição) e compartilhada via Arc<Mutex<_>>, mesmo
+    // motivo de `Telemetry` já ser um handle compartilhável (Fase 7 Onda 5).
+    let prompt_library =
+        std::sync::Arc::new(std::sync::Mutex::new(forge_store::PromptLibrary::open(
+            forge_dir
+                .join("prompt_library.db")
+                .to_str()
+                .unwrap_or(".forge/prompt_library.db"),
+        )?));
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let web_dir = forge_server::default_web_dir();
     if web_agent {
@@ -264,13 +276,25 @@ async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
         let squad_hub = squad_agent::default_hub();
         let squad_pool = squad_agent::default_squad_pool(&root);
         let squad_router = squad_agent::router(squad_hub, squad_pool);
-        web_agent::serve_with_agent(telemetry, &root, addr, web_dir, hub, squad_router).await?;
+        let sidecar_service = prompt_render::default_sidecar_service(&root);
+        let prompt_router = prompt_render::router(sidecar_service);
+        let extra_router = squad_router.merge(prompt_router);
+        web_agent::serve_with_agent(
+            telemetry,
+            prompt_library,
+            &root,
+            addr,
+            web_dir,
+            hub,
+            extra_router,
+        )
+        .await?;
     } else {
         eprintln!(
             "forge dashboard — http://{addr} (assets: {})",
             web_dir.display()
         );
-        forge_server::serve(telemetry, &root, addr, web_dir).await?;
+        forge_server::serve(telemetry, prompt_library, &root, addr, web_dir).await?;
     }
     Ok(())
 }

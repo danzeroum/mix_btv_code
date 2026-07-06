@@ -24,7 +24,9 @@ impl SidecarSupervisor {
         // O diretório do socket é responsabilidade de quem sobe o processo
         // (mesmo achado do `SquadSupervisor`, squad_client.rs) — sem isso, o
         // bind gRPC do lado Python falha com "No such file or directory" se
-        // o caminho estiver num subdiretório ainda não criado.
+        // o caminho estiver num subdiretório ainda não criado (ex.: um
+        // `SidecarService` construído contra um workspace novo, achado real
+        // da Onda 5).
         if let Some(parent) = socket_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -85,8 +87,13 @@ impl SidecarSupervisor {
                 .try_wait()
                 .map_err(|e| SidecarError::Unavailable(e.to_string()))?
             {
+                let mut stderr = String::new();
+                if let Some(mut pipe) = self.child.stderr.take() {
+                    use tokio::io::AsyncReadExt;
+                    let _ = pipe.read_to_string(&mut stderr).await;
+                }
                 return Err(SidecarError::Unavailable(format!(
-                    "sidecar encerrou antes de ficar pronto (status: {status})"
+                    "sidecar encerrou antes de ficar pronto (status: {status}); stderr: {stderr}"
                 )));
             }
             if socket_ready(&self.socket_path) {

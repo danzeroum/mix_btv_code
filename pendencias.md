@@ -428,3 +428,78 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   `timeout ... ` (SIGKILL no processo Rust, que pula TODOS os destructors,
   inclusive o `Drop` que mata o grupo) — não um bug novo, não uma lacuna no
   desenho da Onda 3.
+
+## Onda 5 — Prompts (CRUD + render)
+
+- **[decisão] Branch criada a partir do `main` pós-Onda-3, não empilhada sobre a
+  Onda 4 (squad ao vivo).** A Onda 5 só depende de Onda 1 (fundação, já mergeada)
+  e Onda 3 (sidecar-serviço, já mergeada) — a CI da Onda 4 ainda não tinha fechado
+  quando comecei esta entrega. Consequência real, já resolvida: quando a Onda 4
+  mergeou primeiro, o rebase desta branch sobre o `main` novo deu conflito em
+  8 arquivos (`main.rs`, `squad.rs`, `web_agent.rs`, `forge-proto/{Cargo.toml,
+  build.rs}`, `forge-sidecar/supervisor.rs`, `domain.ts`, este arquivo) — todos
+  mecânicos (as duas ondas tocaram as mesmas linhas de formas complementares,
+  não conflitantes de verdade): `run_dashboard` passou a mesclar
+  `squad_router.merge(prompt_router)` num só `extra: Router`; `supervisor.rs`
+  ficou com as DUAS correções (o `Drop`/group-kill da Onda 4 + o
+  `create_dir_all`/captura de stderr desta onda, que já convergiam pro mesmo
+  código); `domain.ts` perdeu os tipos das duas telas. Nenhuma perda de
+  funcionalidade das duas ondas — só reconciliação de texto/assinatura.
+- **[achado real, corrigido] `SidecarSupervisor::spawn` nunca criava o
+  diretório-pai do socket** (`crates/forge-sidecar/src/supervisor.rs`) — mesma
+  classe de bug já achada e corrigida para o `SquadSupervisor` (Onda 4, branch
+  separada, ainda não mergeada): sem isso, o bind gRPC do lado Python falhava
+  com "No such file or directory" sempre que o diretório do socket (`.forge/`)
+  ainda não existisse — o que é exatamente o caso normal de um workspace novo
+  ou de um `SidecarService` construído contra um diretório de teste. Descoberto
+  ao escrever o teste de paridade HTTP↔gRPC desta onda (o teste existente de
+  `SidecarService` usa um socket solto em `/tmp`, não sob um `.forge/` recém-criado,
+  então nunca expôs o gap). Corrigido na raiz (`create_dir_all` no `spawn`,
+  igual ao `SquadSupervisor`) — quando a Onda 4 mergear, as duas correções
+  devem ser idênticas/triviais de reconciliar. Também aproveitei para dar ao
+  `SidecarSupervisor::wait_ready` a mesma captura de stderr no erro que o
+  `SquadSupervisor` já tinha (o doc-comment já prometia isso, o código não
+  cumpria — inconsistência real, agora corrigida).
+- **[decisão] `PromptLibrary` não ganhou um wrapper `Arc<Mutex<_>>` DENTRO de
+  `forge-store`** (ao contrário do que o próprio PLANO sugere, espelhando
+  `Telemetry`). Em vez disso, `forge-server::AppState` guarda
+  `Arc<Mutex<PromptLibrary>>` diretamente — mesmo efeito prático (aberta uma
+  vez, compartilhada entre requisições, sem reabrir conexão por chamada), sem
+  precisar mexer no tipo público de `forge-store` nem nos usos existentes do
+  CLI (`/prompt` do chat REPL, que usa `PromptLibrary` direto). Se você preferir
+  o wrapper dentro de `forge-store` por consistência com `Telemetry`, é um
+  refactor pequeno e localizado.
+- **[decisão] Guarda de `Origin`/`Host` duplicada em `forge-server`.** Como
+  `forge-server` ganhou aqui suas primeiras rotas mutáveis (`POST`/`DELETE
+  /api/prompts*`), preciso da mesma proteção de CSRF/DNS-rebinding que
+  `forge-cli`'s `web_agent.rs` já aplica no router mesclado — mas não posso
+  importá-la de lá (direção de dependência é a oposta: `forge-cli` depende de
+  `forge-server`, não o contrário). Dupliquei a função (idêntica,
+  `require_local_origin`/`is_local_origin`) em vez de tentar uma extração
+  cross-crate nesta entrega — se isso incomodar, dá para mover as duas para um
+  crate `forge-web-guard` minúsculo depois.
+- **[decisão] Render não instrumenta `fields` com validação de campos
+  obrigatórios no lado Rust.** `GeneratorField.required` vem do sidecar
+  (`GET /api/prompt/generators`) e a UI marca campos obrigatórios com `*`, mas
+  a rota `POST /api/prompt/render` não valida no Rust antes de chamar o
+  sidecar — se faltar um campo que o gerador precisa, o erro vem do lado
+  Python (RPC falha, vira `502` com a mensagem do gRPC). Aceitável: o sidecar
+  já é a fonte de verdade de quais campos cada gerador realmente usa
+  (templates podem mudar sem o Rust saber), duplicar a validação seria uma
+  segunda fonte de verdade discordante.
+- **[nota] Sem teste Playwright de navegador para esta onda — de propósito,
+  não por omissão.** A fronteira do PLANO para a Onda 5 pede especificamente
+  "teste HTTP direto" (CRUD) e "paridade com chamada gRPC direta" (render), ao
+  contrário da Onda 4 que pedia Playwright explicitamente. Os dois testes
+  Rust novos (`forge-server`'s CRUD e `forge-cli::prompt_render`'s paridade)
+  cobrem exatamente isso. Se quiser cobertura de navegador também, é aditivo.
+- **[nota] `PromptGenerator`/`SavedPrompt` saíram de `types/domain.ts`** para
+  `api/prompts.ts` — mesmo padrão já usado para os tipos do squad (Onda 4):
+  tipos específicos de uma tela moram no módulo de API dela, não no arquivo de
+  domínio compartilhado.
+- **[decisão] Botão "fav ★" do painel lateral (que operava sobre "o gerador
+  ativo", resolvendo indiretamente para uma entrada salva) foi removido.** Com
+  ids reais (antes eram strings fabricadas no mock), favoritar por nome de
+  gerador é ambíguo se houver mais de uma entrada salva com o mesmo gerador —
+  o botão "fav" por entrada na lista da biblioteca (que já existia, operando
+  sobre um id direto) é o único caminho agora, sem ambiguidade.
