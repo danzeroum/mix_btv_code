@@ -151,4 +151,49 @@ mod tests {
             Err(LedgerError::BrokenChain { seq: 1, .. })
         ));
     }
+
+    /// Fase 5 Onda 4: a certificação é PRODUZIDA em Python
+    /// (`forge_review.certification.certify`) e REGISTRADA aqui — o ledger
+    /// já suporta qualquer `kind`/`payload` livre, então nenhuma mudança de
+    /// produção é necessária; este teste prova a capacidade com um payload
+    /// no formato real que `Certification.model_dump()` produziria.
+    #[test]
+    fn certificacao_registra_no_ledger_com_cadeia_integra() {
+        let mut store = LedgerStore::open_in_memory().unwrap();
+        store.append(entry("session.start")).unwrap();
+
+        let certification_payload = json!({
+            "run_id": "run-1",
+            "git_sha": "deadbeef",
+            "verdict": {
+                "approved": true,
+                "value_score": 0.86,
+                "reason": "aprovado por média ponderada",
+                "gate_triggered": null,
+            },
+            "evidence_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "steps_summary": ["test: ok", "lint: ok"],
+            "produced_at": "2026-07-05T00:00:00Z",
+        });
+        let cert_entry = LedgerEntry {
+            seq: 0,
+            prev_hash: String::new(),
+            entry_hash: String::new(),
+            kind: "certification".into(),
+            actor: "forge_review".into(),
+            payload: certification_payload.clone(),
+            r#override: None,
+            fake_marker: None,
+            ts: "2026-07-05T00:00:01Z".into(),
+        };
+
+        let registered = store.append(cert_entry).unwrap();
+        assert_eq!(registered.seq, 2);
+        assert_eq!(registered.kind, "certification");
+        assert_eq!(
+            registered.payload["evidence_hash"],
+            certification_payload["evidence_hash"]
+        );
+        assert_eq!(store.verify_chain().unwrap(), 2);
+    }
 }

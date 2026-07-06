@@ -101,11 +101,15 @@ name = "forge-review"
 version = "0.1.0"
 source = { editable = "packages/forge-review" }
 dependencies = [
+    { name = "forge-promptforge" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "forge-promptforge", editable = "packages/forge-promptforge" },
+    { name = "pydantic", specifier = ">=2" },
+]
 
 [[package]]
 name = "forge-squad"
