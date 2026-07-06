@@ -14,7 +14,7 @@ test('editar uma célula da matriz grava um override real, mostra na lista de re
   await page.goto('/')
   await page.getByRole('button', { name: '◨ Administrador' }).click()
   await page.getByRole('button', { name: 'Skills & Permissões' }).click()
-  await expect(page.getByRole('heading', { name: 'Skills, MCP & permissões' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Skills & permissões' })).toBeVisible()
 
   const bashRow = page.locator('tbody tr', { hasText: 'bash' })
   const planCell = bashRow.locator('button').nth(1)

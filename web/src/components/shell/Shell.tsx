@@ -7,7 +7,16 @@ import { WindowChrome } from './WindowChrome'
 import { SCREEN_META } from '../../lib/screenMeta'
 import { SCREEN_COMPONENTS } from '../../lib/screenComponents'
 
-const ADMIN_SURFACE_SCREENS = new Set(['telemetria', 'ledger', 'verify', 'providers', 'skills', 'sugestoes'])
+const ADMIN_SURFACE_SCREENS = new Set([
+  'telemetria',
+  'mcp',
+  'modelos',
+  'ledger',
+  'verify',
+  'providers',
+  'skills',
+  'sugestoes',
+])
 
 export function Shell() {
   const rootRef = useRef<HTMLDivElement | null>(null)

@@ -96,9 +96,24 @@ fn load_lsp_servers(registry: &mut ToolRegistry, root: &Path) {
 /// permission-engine. **Fail-soft:** sem config, config inválida, ou servidor
 /// indisponível → loga e segue (um MCP quebrado não derruba o CLI).
 fn load_mcp_servers(registry: &mut ToolRegistry, root: &Path) {
+    for config in read_mcp_server_configs(root) {
+        match forge_tools::mcp::register_mcp_server(registry, &config) {
+            Ok(n) if n > 0 => eprintln!("  mcp '{}': {n} tool(s) registrada(s)", config.id),
+            Ok(_) => {}
+            Err(e) => eprintln!("  mcp '{}' indisponível — ignorado ({e})", config.id),
+        }
+    }
+}
+
+/// Lê `<root>/.forge/mcp.toml` e devolve os servidores declarados, sem
+/// conectar a nenhum (só parsing) — compartilhado entre `load_mcp_servers`
+/// (registra no `ToolRegistry` para uso real do agente) e o console MCP da
+/// Fase 7 Onda 7 (`mcp_console.rs`, só enumera/probe para exibição). Ausente
+/// ou inválido → vazio (mesmo fail-soft de `load_mcp_servers`).
+pub(crate) fn read_mcp_server_configs(root: &Path) -> Vec<forge_tools::McpServerConfig> {
     let config_path = root.join(".forge").join("mcp.toml");
     let Ok(raw) = std::fs::read_to_string(&config_path) else {
-        return;
+        return Vec::new();
     };
     #[derive(serde::Deserialize)]
     struct McpConfigFile {
@@ -116,21 +131,17 @@ fn load_mcp_servers(registry: &mut ToolRegistry, root: &Path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("  mcp: .forge/mcp.toml inválido ({e}) — ignorado");
-            return;
+            return Vec::new();
         }
     };
-    for s in cfg.server {
-        let config = forge_tools::McpServerConfig {
-            id: s.id.clone(),
+    cfg.server
+        .into_iter()
+        .map(|s| forge_tools::McpServerConfig {
+            id: s.id,
             command: s.command,
             args: s.args,
-        };
-        match forge_tools::mcp::register_mcp_server(registry, &config) {
-            Ok(n) if n > 0 => eprintln!("  mcp '{}': {n} tool(s) registrada(s)", s.id),
-            Ok(_) => {}
-            Err(e) => eprintln!("  mcp '{}' indisponível — ignorado ({e})", s.id),
-        }
-    }
+        })
+        .collect()
 }
 
 /// Descobre subdiretórios de `skills_dir`, veta cada um e registra os

@@ -6,11 +6,10 @@ import { Modal } from '../../primitives/Modal'
 import { AsyncStatus } from '../../primitives/AsyncStatus'
 import { useAsyncAction } from '../../../hooks/useAsyncAction'
 import { useToast } from '../../primitives/Toast'
-import { MCP_SERVERS, reconnectMcp, fetchSkills } from '../../../api/skills'
+import { fetchSkills } from '../../../api/skills'
 import { fetchMatrix, listRules, revokeRule, setRule } from '../../../api/permissions'
 import type {
   AgentProfile,
-  McpServer,
   PermissionMatrixDecision,
   PermissionMatrixRow,
   PermissionRuleRecord,
@@ -51,8 +50,6 @@ export function Skills() {
   const toast = useToast()
   const skillsState = useAsyncAction(fetchSkills)
   const permsState = useAsyncAction(loadPermissions)
-  const [mcpServers, setMcpServers] = useState<McpServer[]>(MCP_SERVERS)
-  const [reconnecting, setReconnecting] = useState<string | null>(null)
   const [revokingId, setRevokingId] = useState<number | null>(null)
   const [pendingChange, setPendingChange] = useState<PendingCellChange | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -62,19 +59,6 @@ export function Skills() {
     void permsState.run()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  async function handleReconnect(id: string) {
-    setReconnecting(id)
-    try {
-      const updated = await reconnectMcp(id)
-      setMcpServers((prev) => prev.map((s) => (s.id === id ? updated : s)))
-      toast.push('success', `${id} reconectado`)
-    } catch {
-      toast.push('error', `falha ao reconectar ${id}`)
-    } finally {
-      setReconnecting(null)
-    }
-  }
 
   async function handleConfirmChange() {
     if (!pendingChange) return
@@ -136,25 +120,6 @@ export function Skills() {
                   </div>
                 )}
               </AsyncStatus>
-            </div>
-          </Card>
-
-          <Card>
-            <strong>Servidores MCP</strong>
-            <div className="stack" style={{ marginTop: 8 }}>
-              {mcpServers.map((s) => (
-                <div key={s.id} className="row" style={{ justifyContent: 'space-between' }}>
-                  <span>{s.id}</span>
-                  <span className="row">
-                    <span style={{ color: s.status === 'ok' ? 'var(--ok)' : 'var(--amber)' }}>{s.status}</span>
-                    {s.status !== 'ok' && (
-                      <button onClick={() => void handleReconnect(s.id)} disabled={reconnecting === s.id} style={arrowBtn}>
-                        {reconnecting === s.id ? 'reconectando…' : 'reconectar'}
-                      </button>
-                    )}
-                  </span>
-                </div>
-              ))}
             </div>
           </Card>
         </div>

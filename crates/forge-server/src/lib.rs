@@ -21,6 +21,7 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use forge_llm::model_tier::{tier_from_id, ModelTier};
 use forge_store::{LedgerStore, PromptLibrary, Telemetry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -85,6 +86,7 @@ pub fn router(
         .route("/api/prompts/{id}", axum::routing::delete(delete_prompt))
         .route("/api/ledger", get(list_ledger))
         .route("/api/ledger/verify", post(verify_ledger))
+        .route("/api/models/usage", get(model_usage))
         .fallback_service(serve_dir)
         .with_state(AppState {
             telemetry,
@@ -167,6 +169,37 @@ struct EventsQuery {
 
 async fn events(State(state): State<AppState>, Query(q): Query<EventsQuery>) -> impl IntoResponse {
     Json(state.telemetry.recent(q.limit.unwrap_or(50)))
+}
+
+#[derive(Serialize)]
+struct ModelUsageEntry {
+    model: String,
+    tier: ModelTier,
+    calls: u64,
+    cache_hits: u64,
+    cache_misses: u64,
+}
+
+/// `GET /api/models/usage` (Fase 7 Onda 7, A5) — agrega os eventos reais
+/// (`llm.call`/`cache.hit`/`cache.miss`, todos já gravados com `props.model`
+/// por `RateLimitedGenerator`/`CachedGenerator`) por modelo; `tier` é
+/// derivado aqui (não em `forge-store`, que não depende de `forge-llm`) via
+/// `model_tier::tier_from_id`, a mesma classificação real usada para
+/// compaction antecipada.
+async fn model_usage(State(state): State<AppState>) -> impl IntoResponse {
+    let entries: Vec<ModelUsageEntry> = state
+        .telemetry
+        .model_usage()
+        .into_iter()
+        .map(|u| ModelUsageEntry {
+            tier: tier_from_id(&u.model),
+            model: u.model,
+            calls: u.calls,
+            cache_hits: u.cache_hits,
+            cache_misses: u.cache_misses,
+        })
+        .collect();
+    Json(entries)
 }
 
 /// Lista as skills (built-in de `skills/` + terceiro de `.forge/skills/`) com o
@@ -950,5 +983,82 @@ mod tests {
         assert_eq!(json["ok"], true);
         assert_eq!(json["verified"], 2);
         assert!(json.get("error").is_none());
+    }
+
+    /// Fronteira da Onda 7 (A5): `GET /api/models/usage` bate por igualdade
+    /// com agregação MANUAL dos mesmos eventos semeados — inclui a coluna
+    /// `tier` derivada de `tier_from_id` (não fabricada), e não conta um
+    /// evento sem `model`.
+    #[tokio::test]
+    async fn models_usage_bate_com_agregacao_manual_dos_eventos_semeados() {
+        let telemetry = Telemetry::open_in_memory().unwrap();
+        for _ in 0..2 {
+            telemetry.record(
+                "llm.call",
+                "s1",
+                serde_json::json!({"model": "claude-sonnet-5"}),
+                "t",
+            );
+        }
+        telemetry.record(
+            "cache.hit",
+            "s1",
+            serde_json::json!({"model": "claude-sonnet-5"}),
+            "t",
+        );
+        telemetry.record(
+            "llm.call",
+            "s1",
+            serde_json::json!({"model": "claude-haiku-4-5"}),
+            "t",
+        );
+        telemetry.record("cache.hit", "s1", serde_json::json!({}), "t");
+
+        let web_dir = fixture_web_dir();
+        let app = router(
+            telemetry,
+            prompt_library_vazia(),
+            ledger_vazio(),
+            web_dir.path(),
+            web_dir.path(),
+        );
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/models/usage")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let arr = json.as_array().unwrap();
+        assert_eq!(
+            arr.len(),
+            2,
+            "só 2 modelos distintos, o evento sem model não conta"
+        );
+
+        let haiku = arr
+            .iter()
+            .find(|e| e["model"] == "claude-haiku-4-5")
+            .unwrap();
+        assert_eq!(haiku["tier"], "small");
+        assert_eq!(haiku["calls"], 1);
+        assert_eq!(haiku["cache_hits"], 0);
+
+        let sonnet = arr
+            .iter()
+            .find(|e| e["model"] == "claude-sonnet-5")
+            .unwrap();
+        assert_eq!(sonnet["tier"], "large");
+        assert_eq!(sonnet["calls"], 2);
+        assert_eq!(sonnet["cache_hits"], 1);
+        assert_eq!(sonnet["cache_misses"], 0);
     }
 }

@@ -20,8 +20,10 @@ export const SCREEN_META: Record<ScreenId, ScreenMeta> = {
   designer: { kicker: 'conceito · fase 4+', title: 'Squad Designer', note: 'arrastar · conectar · salvar', accent: 'var(--wire)', chromeIcon: '⬒', chromeRight: 'designer' },
   sugestoes: { kicker: 'roadmap', title: 'Sugestões de interação', note: 'próximas telas', accent: 'var(--py)', chromeIcon: '✧', chromeRight: 'roadmap' },
   telemetria: { kicker: '127.0.0.1:7878', title: 'Telemetria', note: 'atualiza a cada 5s', accent: 'var(--teal)', chromeIcon: '▦', chromeRight: 'dashboard' },
+  mcp: { kicker: '.forge/mcp.toml', title: 'Console MCP', note: 'sondagem ao vivo · política real', accent: 'var(--wire)', chromeIcon: '⎈', chromeRight: 'mcp' },
+  modelos: { kicker: 'telemetria', title: 'Uso por modelo', note: 'chamadas · cache · tier', accent: 'var(--teal)', chromeIcon: '◈', chromeRight: 'uso' },
   ledger: { kicker: 'hash-chain', title: 'Ledger / Auditoria', note: 'append-only · Nada Fake', accent: 'var(--ok)', chromeIcon: '⛓', chromeRight: 'auditoria' },
   verify: { kicker: '/verify', title: 'Verificação & review por valor', note: 'gate > 0.70', accent: 'var(--ok)', chromeIcon: '✓', chromeRight: 'verify' },
   providers: { kicker: 'gateway LLM', title: 'Providers & rate limits', note: 'keys só no Rust', accent: 'var(--rust)', chromeIcon: '⇄', chromeRight: 'gateway' },
-  skills: { kicker: 'vetting · MCP', title: 'Skills, MCP & permissões', note: 'sidecar health', accent: 'var(--amber)', chromeIcon: '⬡', chromeRight: 'skills' },
+  skills: { kicker: 'vetting', title: 'Skills & permissões', note: 'sidecar health', accent: 'var(--amber)', chromeIcon: '⬡', chromeRight: 'skills' },
 }

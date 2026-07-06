@@ -8,9 +8,11 @@
 //! Um override manual por configuração cobre erros de classificação.
 
 use regex::Regex;
+use serde::Serialize;
 use std::sync::OnceLock;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModelTier {
     Small,
     Medium,

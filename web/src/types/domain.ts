@@ -10,7 +10,7 @@ export type UserScreenId =
   | 'designer'
   | 'sugestoes'
 
-export type AdminScreenId = 'telemetria' | 'ledger' | 'verify' | 'providers' | 'skills'
+export type AdminScreenId = 'telemetria' | 'mcp' | 'modelos' | 'ledger' | 'verify' | 'providers' | 'skills'
 
 export type ScreenId = UserScreenId | AdminScreenId
 
@@ -81,11 +81,6 @@ export interface SkillEntry {
   id: string
   status: 'aprovado' | 'bloqueado' | 'em_analise'
   detail: string
-}
-
-export interface McpServer {
-  id: string
-  status: 'ok' | 'pendente'
 }
 
 export type PermissionMatrixDecision = 'allow' | 'ask' | 'deny'

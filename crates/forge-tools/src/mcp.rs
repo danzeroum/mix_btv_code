@@ -11,11 +11,12 @@
 //! pendencias.md.
 
 use crate::{bound_output, Tool, ToolError, ToolOutput, ToolRegistry, DEFAULT_OUTPUT_LIMIT};
+use serde::Serialize;
 use serde_json::Value;
 use std::future::Future;
 
 /// Um servidor MCP declarado pelo usuário: o comando que o sobe via stdio.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct McpServerConfig {
     pub id: String,
     pub command: String,
@@ -23,6 +24,7 @@ pub struct McpServerConfig {
 }
 
 /// Metadados de uma tool anunciada por um servidor MCP.
+#[derive(Serialize)]
 pub struct McpToolMeta {
     pub name: String,
     pub description: String,

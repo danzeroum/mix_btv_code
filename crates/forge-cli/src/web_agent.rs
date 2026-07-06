@@ -642,7 +642,10 @@ fn rule_record_to_core(record: forge_store::RuleRecord) -> Rule {
 /// storage não puder ser aberto, mesmo padrão de outros stores opcionais
 /// (telemetria): uma `rules.db` corrompida nunca deve impedir uma sessão de
 /// rodar, só faz o perfil se comportar como se não tivesse override nenhum.
-fn load_rule_overrides(root: &std::path::Path, profile: &str) -> Vec<Rule> {
+/// `pub(crate)`: reusado pelo console MCP (Onda 7) para o preview de
+/// política real — os perfis const não têm regra `mcp__*`, então sem isso o
+/// preview seria sempre "ask".
+pub(crate) fn load_rule_overrides(root: &std::path::Path, profile: &str) -> Vec<Rule> {
     let Ok(store) = open_rule_store(root) else {
         return Vec::new();
     };

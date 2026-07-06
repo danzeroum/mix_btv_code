@@ -10,7 +10,7 @@
 // o sinal ao `cargo run` filho) ao final da suíte.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,10 +27,11 @@ function run(cmd, args) {
   }
 }
 
-// 1. garante que o binário do CLI e os exemplos de seed estão compilados.
+// 1. garante que o binário do CLI, os exemplos de seed e o fixture MCP
+// (Fase 6 Onda 4, usado pelo teste do console MCP da Onda 7) estão compilados.
 run('cargo', [
-  'build', '-p', 'forge-cli', '-p', 'forge-store',
-  '--example', 'seed_telemetry', '--example', 'seed_ledger',
+  'build', '-p', 'forge-cli', '-p', 'forge-store', '-p', 'forge-tools',
+  '--example', 'seed_telemetry', '--example', 'seed_ledger', '--bin', 'forge_mcp_fixture',
 ])
 
 // 2. diretório de trabalho isolado para o dashboard (.forge/telemetry.db e
@@ -46,6 +47,25 @@ run('cargo', [
   dbPath, 'llm.call', 'e2e-integration', '{"provider":"anthropic"}',
 ])
 
+// 3c. semeia eventos com `model` (Fase 7 Onda 7, A5) — session_id dedicado
+// (e2e-model-usage) para não inflar a contagem de linhas de
+// "e2e-integration" que o teste de telemetria já conta; modelos com sufixo
+// "-e2e" exclusivo desta suíte, mas ainda batendo nos regexes reais de
+// `tier_from_id` ("haiku" -> small, "sonnet" -> large), para o teste de Uso
+// por Modelo provar a agregação E a classificação de tier de ponta a ponta.
+run('cargo', [
+  'run', '-q', '-p', 'forge-store', '--example', 'seed_telemetry', '--',
+  dbPath, 'llm.call', 'e2e-model-usage', '{"model":"claude-sonnet-5-e2e"}',
+])
+run('cargo', [
+  'run', '-q', '-p', 'forge-store', '--example', 'seed_telemetry', '--',
+  dbPath, 'cache.hit', 'e2e-model-usage', '{"model":"claude-sonnet-5-e2e"}',
+])
+run('cargo', [
+  'run', '-q', '-p', 'forge-store', '--example', 'seed_telemetry', '--',
+  dbPath, 'llm.call', 'e2e-model-usage', '{"model":"claude-haiku-4-5-e2e"}',
+])
+
 // 3b. semeia 2 entradas reais no ledger (mesmo LedgerStore::append usado em
 // produção) com um ator dedicado (e2e-ledger-seed) que nenhum outro spec
 // usa — o teste de Ledger filtra por ele, então não importa a ordem em que
@@ -59,6 +79,17 @@ run('cargo', [
   'run', '-q', '-p', 'forge-store', '--example', 'seed_ledger', '--',
   ledgerPath, 'tool.run', 'e2e-ledger-seed', '{"tool":"bash"}', '2026-01-01T00:00:01Z',
 ])
+
+// 3d. `.forge/mcp.toml` (Fase 7 Onda 7, A1) com 2 servidores: um apontando
+// pro fixture MCP REAL (mesmo bin que `forge-tools/tests/mcp_integration.rs`
+// usa — handshake de verdade, não um mock) e um comando inexistente, para o
+// teste do console MCP provar os dois status (online/offline) num mesmo probe.
+const mcpFixtureBin = join(repoRoot, 'target', 'debug', 'forge_mcp_fixture')
+writeFileSync(
+  join(workDir, '.forge', 'mcp.toml'),
+  `[[server]]\nid = "vivo"\ncommand = "${mcpFixtureBin}"\nargs = []\n\n` +
+    `[[server]]\nid = "morto"\ncommand = "/caminho/que/nao/existe/forge-mcp-x"\nargs = []\n`,
+)
 
 // 4. sobe o dashboard real apontando pro build da SPA, servindo o evento semeado.
 // --manifest-path resolve o workspace a partir de workDir (cargo não muda o

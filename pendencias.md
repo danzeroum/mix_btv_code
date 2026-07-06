@@ -580,3 +580,77 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   ordem de execução dos arquivos de teste. Com o filtro, a asserção
   (exatamente 2 linhas, hash/seq batendo) é robusta independente de quantas
   outras entradas os demais specs acumularem no mesmo arquivo.
+
+## Onda 7 — Console MCP (A1) + Uso por modelo (A5)
+
+- **[decisão] `CARGO_BIN_EXE_forge_mcp_fixture` não está disponível no teste de
+  `forge-cli`** (confirmado empiricamente — o cargo só expõe essa env var para
+  o PRÓPRIO pacote que declara o `[[bin]]`, não para pacotes dependentes). O
+  teste de `mcp_console.rs` builda o fixture explicitamente
+  (`cargo build -p forge-tools --bin forge_mcp_fixture`) e localiza o binário
+  no `target/` compartilhado do workspace via `CARGO_MANIFEST_DIR/../../target/
+  debug/forge_mcp_fixture` — mesmo idioma já usado em vários testes do repo
+  para alcançar a raiz do workspace a partir de qualquer crate (`sidecar.rs`,
+  `skills.rs`, `parity.rs`, etc.), só que aplicado a um binário em vez de um
+  diretório. Custo extra: ~25s na primeira execução (compila as deps do
+  `rmcp` server), ~2s depois (cache do cargo).
+- **[decisão] `read_mcp_server_configs` extraído de `skills.rs::load_mcp_servers`
+  para reuso.** Antes, o parsing de `.forge/mcp.toml` só existia embutido
+  dentro de `load_mcp_servers` (que já registra as tools no `ToolRegistry`).
+  O console MCP só precisa ENUMERAR os servidores declarados (para sondar e
+  exibir, sem registrar nada) — extraí a leitura pura (`pub(crate) fn
+  read_mcp_server_configs`), `load_mcp_servers` agora só itera sobre o que ela
+  devolve. Mesmo padrão de parsing de `load_lsp_servers` (structs locais
+  `McpConfigFile`/`ServerEntry`) permanece intocado, só ganhou um dono
+  compartilhado.
+- **[decisão] Preview de política do console MCP usa `web_agent::
+  load_rule_overrides` (agora `pub(crate)`), não os perfis const puros.**
+  `AgentProfile::BUILD`/`PLAN` não têm regra nenhuma para `mcp__*` — sem
+  consultar o MESMO store de `Rule` que a Onda 2 já usa para a matriz de
+  permissões, o preview seria sempre "ask", nunca refletindo uma decisão real
+  do usuário. Mostra as DUAS colunas (build/plan), mesmo padrão visual da
+  matriz existente em Skills.tsx.
+- **[decisão] Probe de servidor MCP roda em `spawn_blocking` + `tokio::time::
+  timeout` de 5s.** `list_tools_blocking` já usa uma thread+runtime própria
+  internamente (ponte sync→async do `forge-tools::mcp`) — chamável de dentro
+  de um handler async só via `spawn_blocking` para não bloquear o executor.
+  Um servidor lento/travado vira "offline" com mensagem explícita após 5s, em
+  vez de travar o dashboard. Caveat aceito, não corrigido nesta onda: se o
+  timeout estoura, a thread bloqueada dentro de `list_tools_blocking` não é
+  cancelada (rmcp/threads não são cancel-safe) — pode vazar uma thread por
+  probe malsucedido. Risco pré-existente da própria `list_tools_blocking`
+  (usada assim antes desta onda também), não introduzido aqui; registrado
+  para não ser esquecido caso vire um problema de verdade em produção.
+- **[decisão] `ModelUsage`/`ModelTier` não viram uma segunda fonte de verdade
+  entre `forge-store` e `forge-llm`.** `forge-store::TelemetryStore::
+  model_usage()` só agrega contagens brutas por `props.model` (sem saber o
+  que é um "tier") — `forge-server` (que já depende de `forge-llm`, hoje só
+  para o bin `loadgen`) é quem chama `tier_from_id` para anexar a coluna
+  `tier` na resposta HTTP. `forge-store` continua sem depender de
+  `forge-llm`.
+- **[decisão] Rota `GET /api/models/usage` foi ao ar sem instrumentar produção
+  além do que já existia.** `RateLimitedGenerator`/`CachedGenerator` já
+  gravavam `props.model` em `llm.call`/`cache.hit`/`cache.miss` desde antes
+  desta fase — a onda só soma uma consulta nova (`model_usage`) sobre dados
+  já reais, não fabrica nem precisa semear nada de novo em produção.
+- **[decisão] Skills.tsx perdeu o card mock "Servidores MCP"
+  (`MCP_SERVERS`/`reconnectMcp` de `skills.ts`) e o título/kicker da tela
+  caiu de "Skills, MCP & permissões" para "Skills & permissões"** (MCP tem
+  tela própria agora) — consequência: o teste Playwright pré-existente
+  `permissions-real-backend.spec.ts` que checava o heading antigo foi
+  atualizado para o texto novo (mudança mecânica, mesma tela, só o título).
+- **[decisão] Teste Playwright do console MCP revoga o override que cria, no
+  `finally`.** `rules.db` é compartilhado por todo o `webServer` da suíte de
+  integração — `permissions-real-backend.spec.ts` assume a lista de overrides
+  vazia no início do seu próprio teste. Sem a limpeza, a ordem de execução dos
+  specs (não determinística entre os 2 workers do Playwright) faria esse
+  teste falhar de forma intermitente. Mesmo motivo pelo qual o seed de
+  telemetria do A5 usa um `session_id` dedicado (`e2e-model-usage`, não
+  `e2e-integration`) — evita inflar a contagem que o teste de telemetria já
+  soma.
+- **[nota] Ambas as telas novas (`mcp`, `modelos`) ganharam Playwright real-
+  backend** (ao contrário da Onda 5, que documentou explicitamente pular
+  Playwright) — decisão de proporcionalidade: são telas 100% novas e
+  read-only, e o custo de semear um servidor MCP fixture real + eventos de
+  telemetria com `model` já estava pago pelos testes Rust; estender ao
+  browser foi incremental.

@@ -6,6 +6,7 @@
 //! `squad` ativa o sidecar Python na Fase 4; `verify` completa na Fase 5.
 
 mod cache;
+mod mcp_console;
 mod prompt_render;
 mod rate_limit_gen;
 mod session;
@@ -287,7 +288,8 @@ async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
         let squad_router = squad_agent::router(squad_hub, squad_pool);
         let sidecar_service = prompt_render::default_sidecar_service(&root);
         let prompt_router = prompt_render::router(sidecar_service);
-        let extra_router = squad_router.merge(prompt_router);
+        let mcp_router = mcp_console::router(root.clone());
+        let extra_router = squad_router.merge(prompt_router).merge(mcp_router);
         web_agent::serve_with_agent(
             telemetry,
             prompt_library,
