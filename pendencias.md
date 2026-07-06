@@ -104,6 +104,32 @@
   `--include-ignored`. Local: idem para exercitar o caminho real. **Resolvido:**
   passou no CI (PR #15, merge 03ce513) — o log do job `sandbox` mostra os dois
   testes reais `... ok`, `0 ignored`.
+- **[dúvida — achado de dogfooding real, pós-merge]** Testando manualmente com a
+  API da DeepSeek (VPS do usuário, fora do CI), o agente **nunca invocou**
+  `lsp__rust__definition` mesmo quando o prompt pedia explicitamente ("usando
+  LSP, onde é definido X? não abra outros arquivos, use a ferramenta de LSP") e
+  o modelo **anunciou a intenção de usar o LSP duas vezes** — nas duas ele
+  recuou pra `grep`+`read`. Causa raiz confirmada no código, não é só "o modelo
+  não quis": o `input_schema` da tool exige `{file, line, character}` — a
+  **coluna exata** de onde o símbolo aparece — mas `grep` (`crates/forge-tools/
+  src/grep.rs:29,74-79`) devolve só `caminho:linha:conteúdo`, **nunca a
+  coluna**. Pra montar uma chamada válida de LSP a partir de um cold-start ("sei
+  que X é usado em algum lugar, ache a definição"), o modelo precisaria contar
+  caracteres manualmente na linha — um passo de raciocínio extra, propenso a
+  erro, que grepar/ler a definição direto evita com o mesmo resultado final.
+  Não é bug (a tool funciona quando chamada — provado no CI), é fricção de
+  design: a tool de **posição** não compõe bem com as tools de **conteúdo** que
+  o agente já tem à mão. Numa das tentativas o modelo também gastou 2min num
+  `cargo doc --open` (timeout) — escolha pesada e inadequada (--open tentaria
+  abrir navegador num container headless) em vez de um grep direto.
+  **Ideias de mitigação (não implementadas, deixo pra você decidir):** (a)
+  `grep` passar a expor coluna (ripgrep suporta `--column`) — daria ao modelo os
+  dados pra montar a chamada LSP sem contar na mão; (b) a tool LSP aceitar um
+  modo de conveniência por **nome de símbolo** (ela mesma acha a 1ª ocorrência e
+  resolve a posição), tirando o peso de encontrar a coluna do agente. Nenhuma
+  das duas é urgente — o agente sempre chegou na resposta certa via grep/read;
+  é sobre a ferramenta LSP ser efetivamente usada, não sobre correção do
+  resultado.
 
 ## Onda 6 — RAG (recuperação semântica da memória)
 
