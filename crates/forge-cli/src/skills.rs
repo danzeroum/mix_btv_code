@@ -37,7 +37,52 @@ pub fn build_registry(root: &Path) -> ToolRegistry {
             eprintln!("  skills de terceiro: {loaded} vetada(s), registrada(s) (rodam no sandbox)");
         }
     }
+    // Servidores MCP declarados em `.forge/mcp.toml` (Fase 6 Onda 4): tools
+    // externas expostas no registry, sob o mesmo motor de permissões.
+    load_mcp_servers(&mut registry, root);
     registry
+}
+
+/// Carrega servidores MCP declarados em `<root>/.forge/mcp.toml` (Fase 6 Onda 4)
+/// e registra suas tools (namespaced `mcp__<server>__<tool>`) no registry, sob o
+/// permission-engine. **Fail-soft:** sem config, config inválida, ou servidor
+/// indisponível → loga e segue (um MCP quebrado não derruba o CLI).
+fn load_mcp_servers(registry: &mut ToolRegistry, root: &Path) {
+    let config_path = root.join(".forge").join("mcp.toml");
+    let Ok(raw) = std::fs::read_to_string(&config_path) else {
+        return;
+    };
+    #[derive(serde::Deserialize)]
+    struct McpConfigFile {
+        #[serde(default)]
+        server: Vec<ServerEntry>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ServerEntry {
+        id: String,
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+    }
+    let cfg: McpConfigFile = match toml::from_str(&raw) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  mcp: .forge/mcp.toml inválido ({e}) — ignorado");
+            return;
+        }
+    };
+    for s in cfg.server {
+        let config = forge_tools::McpServerConfig {
+            id: s.id.clone(),
+            command: s.command,
+            args: s.args,
+        };
+        match forge_tools::mcp::register_mcp_server(registry, &config) {
+            Ok(n) if n > 0 => eprintln!("  mcp '{}': {n} tool(s) registrada(s)", s.id),
+            Ok(_) => {}
+            Err(e) => eprintln!("  mcp '{}' indisponível — ignorado ({e})", s.id),
+        }
+    }
 }
 
 /// Descobre subdiretórios de `skills_dir`, veta cada um e registra os
@@ -322,6 +367,35 @@ permissions = ["read"]
             reg.iter().count(),
             4,
             "a skill de terceiro que colide com um built-in não é registrada"
+        );
+    }
+
+    /// Onda 4 — sem `.forge/mcp.toml`, o registry fica só com os built-in.
+    #[test]
+    fn mcp_sem_config_nao_altera_o_registry() {
+        let root = tempfile::tempdir().unwrap();
+        let reg = build_registry(root.path());
+        assert_eq!(reg.iter().count(), 4, "sem .forge/mcp.toml, só os built-in");
+    }
+
+    /// Onda 4 — fail-soft: um servidor MCP declarado que não sobe é ignorado
+    /// (logado), sem derrubar o CLI nem contaminar o registry.
+    #[test]
+    fn mcp_servidor_indisponivel_e_ignorado_fail_soft() {
+        let root = tempfile::tempdir().unwrap();
+        let forge = root.path().join(".forge");
+        fs::create_dir_all(&forge).unwrap();
+        fs::write(
+            forge.join("mcp.toml"),
+            "[[server]]\nid = \"x\"\ncommand = \"comando-mcp-inexistente-xyz\"\n",
+        )
+        .unwrap();
+        let reg = build_registry(root.path());
+        assert!(reg.get("bash").is_some());
+        assert_eq!(
+            reg.iter().count(),
+            4,
+            "nenhuma tool de um servidor MCP que não sobe"
         );
     }
 }

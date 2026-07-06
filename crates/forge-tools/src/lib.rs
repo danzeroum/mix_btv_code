@@ -8,12 +8,14 @@ pub mod bash;
 pub mod diff;
 pub mod edit;
 pub mod grep;
+pub mod mcp;
 pub mod read;
 pub mod registry;
 pub mod sandbox;
 pub mod skill;
 
 pub use diff::{format_diff, line_diff, DiffLine};
+pub use mcp::{McpServerConfig, McpTool};
 pub use registry::ToolRegistry;
 pub use sandbox::{Sandbox, SandboxError, SandboxOutput};
 pub use skill::SkillTool;
