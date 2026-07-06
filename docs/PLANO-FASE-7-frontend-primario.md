@@ -10,13 +10,25 @@
 > **Este documento substitui `docs/PLANO-INTEGRACAO-FRONTEND.md`** (branch
 > `claude/frontend-backend-integration-7u5mti`, nunca mergeado — nenhuma PR aberta
 > para ele). Mesmo território, mesma pesquisa de base (o servidor expõe só 3 rotas
-> GET, o resto é mock), mas com granularidade de 12 ondas e fronteira de teste
-> executável por onda, em vez de 5 ondas mais largas. Ideias concretas dessa outra
+> GET, o resto é mock), mas com granularidade fina de ondas e fronteira de teste
+> executável por onda, em vez de 5 ondas mais largas (a contagem exata de ondas
+> deste documento está na emenda logo abaixo — mudou desde a supersessão original).
+> Ideias concretas dessa outra
 > varredura foram absorvidas aqui: a guarda de `Origin`/`Host`, o wiring de MCP real
 > + telemetria por modelo (Onda 7), o contrato de erro `{error, code}` via
 > `fetchJson()`, o truque `ScriptedGenerator`/modo roteirizado para e2e sem API key,
 > e o filtro `?actor=` do ledger. O documento antigo recebeu uma nota de "superseded"
 > no topo, nesta mesma entrega — nenhum dos dois deve divergir dali em diante.
+>
+> **Emenda (15 ondas, era 12):** o recorte original tratava o Grupo A do
+> `LEVANTAMENTO-UI-DESIGNER.md` como fora de escopo, com só 2 exceções (Onda 7).
+> Investigação adicional — 3 agentes Explore (handoff de design em
+> `docs/design_handoff_forge_telas/`, verificação de backend por tela, mecanismo de
+> registro de tela) + 1 agente Plan — mostrou que as 7 telas de Grupo A já têm
+> handoff de design pronto (`README.md` §12 + protótipo HTML) dando a cada uma seu
+> próprio item de navegação, não cartões embutidos. O escopo mudou: Grupo A fecha
+> **7/7**. Onda 7 foi reescrita (A1 completo, não só o piso) e as Ondas 8, 9 e 10 são
+> novas (A3, A2, A4+A6+A7); as ondas seguintes renumeraram (+3).
 
 ## 0. Contexto e critérios de conclusão
 
@@ -45,6 +57,10 @@ A Fase 7 define quatro critérios literais de conclusão:
 4. **Nenhuma tela finge fazer algo que o backend não faz** — onde o backend ainda não
    sustenta o comportamento (autonomia progressiva, mutação de providers), a tela
    declara isso explicitamente em vez de simular.
+5. **As 7 telas do Grupo A (A1-A7) existem e operam sobre dados reais** — cada uma
+   com sua própria rota e seu próprio item de navegação (não cartão embutido em
+   tela existente), honestas onde o backend ainda não sustenta tudo (A2 mostra
+   banner de dado semeado; A4 mostra banner de uso ilustrativo) em vez de fabricar.
 
 A postura local-first/single-user (`forge-server` amarrado a `127.0.0.1`) não muda —
 esta fase não é "virar SaaS multiusuário". Mas o navegador como forma **primária** de
@@ -125,6 +141,80 @@ paranoia de produção.
   variante pública reusável (mesma promoção que `echo`/`from_turn` já fizeram) — não
   inventar sequenciamento do zero.
 
+**Achados do Grupo A (revisão de escopo — as 7 telas A1-A7):**
+
+- **Regra de posicionamento de rota (cross-cutting, vale para as Ondas 7-10):**
+  `forge-server` continua sem depender de `forge-tools`/`forge-core`/`forge-sidecar`
+  (intocado desde a Onda 1). Rotas que só precisam do que `forge-server` **já**
+  depende (`forge-store`, `forge-schemas`, e `forge-llm` — já é dependência do
+  Cargo, hoje usado só pelo bin `loadgen`) entram **direto em
+  `crates/forge-server/src/lib.rs`**, ao lado de `/api/skills`. Rotas que precisam
+  de `forge-tools`/`forge-core`/`forge-sidecar` entram no router mesclado de
+  `forge-cli` (o mecanismo que a Onda 1 já cria). Por tela: **A5 e A4 →
+  `forge-server` direto**; **A2 → `forge-server` direto** (mesma classe de A5);
+  **A1, A3, A6, A7 → router de `forge-cli`**.
+- **A1 Console MCP:** `list_tools_blocking`/`McpToolMeta` (`forge-tools/src/mcp.rs:
+  65,26-30`) não derivam `Serialize` hoje. O nome namespaced (`mcp__<server>__
+  <tool>`) e o preview de política (`mcp:<server>/<tool> <preview>`, `mcp.rs:
+  52-56`) não vêm prontos — computar via `PermissionEngine::evaluate(name, scope)`
+  (`forge-core/src/permission.rs:34`, puro/síncrono). **Dependência real:** os
+  perfis const (`AgentProfile::BUILD`/`PLAN`) não têm regra `mcp__*` nenhuma —
+  o preview só é significativo consultando o store de `Rule` persistida que a
+  Onda 2 introduz (soft-dependência em Onda 2, não só Onda 1). `McpServer`
+  (`domain.ts`) só tem `{id,status}`, precisa de `tools`. **Limpeza obrigatória:**
+  o card MCP mock em `Skills.tsx:86-103` (+ estado `:24-25` + handler `:50-61` +
+  import `:5`) e `MCP_SERVERS`/`reconnectMcp` em `skills.ts:11-15,58-65` são
+  **removidos**, não deixados coexistir.
+- **A5 Uso por modelo:** `telemetry.rs:83` (`summary()`) só agrupa por nome —
+  falta consulta irmã por `json_extract(props,'$.model')`, mesmo padrão de
+  `experiment_variants` (`telemetry.rs:117-139`). `model_tier::tier_from_id`
+  (`model_tier.rs:61`, real/testado) dá a coluna `tier` de graça — `ModelTier`
+  não deriva `Serialize` hoje. **`web/src/api/models.ts` já existe** (tela
+  `modelo` de usuário) — o módulo novo chama-se `modelUsage.ts`.
+- **A2 Experimentos A/B:** `ExperimentReport::from_two_variants`
+  (`experiment.rs:83`) + `Telemetry::experiment_variants` já existem, só
+  chamados pelo CLI (`main.rs:178`) — zero rota HTTP. Ambos os tipos já derivam
+  `Serialize`+`JsonSchema`, zero DTO novo. Caveat honesto já redigido no handoff:
+  nenhum código de produção escreve `props.experiment/variant/success` ainda —
+  só testes e `examples/seed_telemetry.rs`; a tela mostra dados semeados com
+  banner explícito (instrumentar produção **não** é trabalho desta fase).
+  `Sugestoes.tsx:11` tem um cartão placeholder apontando para `prompts` — retarget
+  para a tela nova.
+- **A3 Mapa de memória/RAG + busca (o item mais difícil):**
+  `AgentMemorySystem.recall_similar`/`remember_decision` (`memory.py:110,72`) e o
+  ranqueador TF-IDF (`recall.py:89`) são reais e testados (Fase 6 Onda 6), mas
+  100% em processo Python, sem superfície externa. O RPC `CoreService.Recall`/
+  `Remember` (`core.proto:18-19`) está `unimplemented!` (`core_server.rs:
+  111-121`) **e é a direção errada**: `CoreService` é servido pelo Rust, chamado
+  pelo Python — o dado de memória mora no Python, então expor ao frontend exige
+  a direção oposta, igual a `PromptForgeService`/`SquadService` (servidos pelo
+  Python, chamados pelo Rust via `SidecarClient`/`SquadClient`). O próprio
+  protótipo do handoff erra isso (cita "CoreService.Recall" na cópia de
+  loading) — a tela real corrige, não repete o engano. **Achado novo — não-escopo
+  explícito:** `forge_squad/forgetting.py` (`IntelligentForgetting.
+  adaptive_forget`, `MemoryStore`) é código morto — chamado só pelo próprio teste
+  unitário, nunca por `memory.py`/`orchestrator.py`/`server.py` (mesma classe do
+  achado `max_autonomy_level`). O painel "memória por agente" do protótipo mostra
+  uma tendência de esquecimento que nada no código computa — a tela real não
+  mostra essa coluna.
+- **A4 Rate limits:** `RateLimiter::for_tier` (`rate_limit.rs:48-55`) é real.
+  **Armadilha de corretude:** `poll()` (`:59`) é privado e **muta** (empurra
+  timestamp) como efeito colateral de checar vaga (`:70`) — um getter de uso que
+  chamasse `poll()` faria **abrir o dashboard consumir uma vaga real de produção
+  silenciosamente**. Precisa de método novo e separado, só poda + conta, nunca
+  empurra, com teste dedicado provando efeito colateral zero. O piso (tetos reais
+  + banner "uso ilustrativo") não exige esse getter — é degrau opcional.
+- **A6 Sandbox & skills de terceiro:** `Sandbox::new` (`sandbox.rs:43-52`, campos
+  `pub`) + `/api/skills` (já real). Ping ao Docker só existe embutido em
+  `run_with` (`:151-153`, side-effect de rodar algo de verdade) — precisa de
+  `Sandbox::ping()` novo, fino. Tela **read-only** — o protótipo do handoff não
+  tem handler nenhum de instalar/vetar/habilitar/remover.
+- **A7 Language servers/LSP:** enumeração de `.forge/lsp.toml` é comprovadamente
+  livre de processo (teste existente `skills.rs:463-479` prova isso apontando um
+  comando inexistente). **Armadilha de escopo:** não adicionar um probe sob
+  demanda para "ver se está rodando" — quebraria a propriedade que aquele teste
+  protege. A tela mostra só config declarada + uso real já ocorrido na sessão.
+
 **Inventário do Grupo B (o escopo desta fase — 11 lacunas reais):**
 
 | # | Tela/ação | Backend real hoje |
@@ -148,17 +238,19 @@ config com ADR próprio"). O que este documento decide diferente, deliberadament
 permitir a edição — mas com trilha de auditoria (ver Onda 2) em vez de deixá-la
 read-only.
 
-**Não-escopo explícito:** Grupo A do `LEVANTAMENTO-UI-DESIGNER.md` (Experimentos A/B
-como tela dedicada, Mapa de memória/RAG, quota de rate-limit editável, gestão de
-skill de terceiro, status LSP) é **design novo**, não wiring — fica fora, candidato a
-fase seguinte. **Exceção deliberada — 2 dos 7 itens de Grupo A são wiring puro, sem
-nenhum design novo, e sua ausência contradiz a régua "Nada Fake" do próprio plano:**
-Console MCP (a tela Skills hoje exibe saúde **fabricada** de servidores
-filesystem/git/postgres que não existem, `web/src/api/skills.ts`) e telemetria por
-modelo (uma consulta a mais sobre dado que a Telemetria — já 100% real — já carrega
-em `props.model`). Os dois entram via a Onda 7 nova, com fronteira read-only. A
-Experimentos A/B **não** entra por essa mesma exceção porque, diferente dos outros
-dois, exige uma tela inteira nova — é design, não wiring.
+**Grupo A — 7/7 fechado (revisão de escopo):** o recorte original tratava o Grupo A
+do `LEVANTAMENTO-UI-DESIGNER.md` (A1 Console MCP, A2 Experimentos A/B, A3 Mapa de
+memória/RAG, A4 Rate limits, A5 Uso por modelo, A6 Sandbox & skills de terceiro, A7
+Language servers/LSP) como design novo fora de escopo, com só 2 exceções (A1
+parcial + A5) por serem wiring puro. Um handoff de design real já existe para as 7
+(`docs/design_handoff_forge_telas/README.md` §12 + protótipo HTML, na branch
+`claude/frontend-backend-integration-7u5mti` — conteúdo genuinamente novo,
+confirmado por `git diff`), dando a cada tela seu próprio item de navegação. Isso
+muda o recorte: as 7 entram nesta fase, via Ondas 7 (A1 completo + A5), 8 (A3), 9
+(A2) e 10 (A4+A6+A7) — ver §2. A cobertura de rota no handoff é desigual (só A1 e
+A2 têm rota nomeada; A3 só tem um método gRPC, e é o **errado**; A4/A5/A6/A7 não
+têm rota nenhuma) — definir o contrato por tela é trabalho de planejamento real
+desta emenda, não é só seguir o handoff.
 
 **Princípio de recorte:** priorizar o que o backend **já oferece** sobre inventar
 capacidade nova. Isso guia duas ondas:
@@ -311,30 +403,146 @@ de "ligado".
 tela mostra exatamente essas N (hash prev/curr por igualdade); `?actor=X` devolve só
 as entradas de X; verificação mostra `ok:true, verified:N`.
 
-### Onda 7 — MCP real + Telemetria por modelo (zero dependência)
+### Onda 7 — Console MCP + Uso por modelo (telas dedicadas)
 
-Fecha os 2 itens de Grupo A que são wiring puro, sem design novo (ver §1). Mesma
-classe de esforço da Onda 6 — paralelizável desde o dia 1.
+Fecha A1 **por completo** (não só o piso da versão anterior) e A5 — cada um como
+tela **própria** (`mcp`, `modelos`), não cartão embutido em Skills/Telemetria.
 
-- `GET /api/mcp`: enumera `.forge/mcp.toml` (`load_mcp_servers`) e chama
-  `list_tools_blocking` (`forge-tools/src/mcp.rs:65`) por servidor em
-  `spawn_blocking` com timeout curto; status `up`/`down` honesto. Substitui
-  `MCP_SERVERS`/`reconnectMcp` mock em `web/src/api/skills.ts` (linhas 11-15,
-  59-65). Fecha a pendência já registrada em `pendencias.md` (Onda 4 da Fase 6:
-  "Frontend MCP não ligado").
-- Telemetria por modelo: nova consulta em `TelemetryStore` agrupando por
-  `props.model` via `json_extract` — mesmo padrão de `experiment_variants`
-  (`telemetry.rs:117-139`, que já agrupa por `props.variant`/`props.experiment`) — +
-  um card na tela Telemetria, que já é 100% real.
+- **A1** (router de `forge-cli` — precisa de `forge-tools`+`forge-core`): `GET
+  /api/mcp` enumera `.forge/mcp.toml` e chama `list_tools_blocking`
+  (`forge-tools/src/mcp.rs:65`) por servidor em `spawn_blocking` com timeout
+  curto; nome namespaced + preview de política via `PermissionEngine::evaluate`
+  consultando **o mesmo store de `Rule` persistida da Onda 2** (não os perfis
+  const, que não têm regra `mcp__*`). `McpServerConfig`/`McpToolMeta` ganham
+  `#[derive(Serialize)]`; `McpServer` (`domain.ts`) ganha `tools:
+  McpToolInfo[]`. **Remove** o card MCP mock de `Skills.tsx:86-103`
+  (+ estado/handler/import) e `MCP_SERVERS`/`reconnectMcp` de `skills.ts:
+  11-15,58-65` — não deixa coexistir.
+- **A5** (direto em `crates/forge-server/src/lib.rs` — só precisa de
+  `forge-store`, zero dependência real de Onda 1): nova consulta em
+  `TelemetryStore` agrupando por `json_extract(props,'$.model')`, mesmo padrão
+  de `experiment_variants` (`telemetry.rs:117-139`); coluna `tier` via
+  `model_tier::tier_from_id` (real/testado); `ModelTier` ganha
+  `#[derive(Serialize)]`. Módulo frontend `web/src/api/modelUsage.ts` (não
+  `models.ts`, já ocupado pela tela `modelo` de usuário).
+- `nav.ts`/`screenMeta.ts`/`screenComponents.tsx`/`Shell.tsx`'s
+  `ADMIN_SURFACE_SCREENS` ganham `'mcp'`, `'modelos'`, na ordem do handoff
+  (depois de `telemetria`, antes de `experimentos`/`ratelimit`).
 
-Sem ADR novo — as duas rotas são read-only, sem contrato novo.
+Sem ADR novo além do já previsto (A1 já se apoia no store de Rule da Onda 2/ADR
+0018; A5 é mecânico).
 
-*Fronteira:* fixture com 2 servidores MCP declarados (1 respondendo, 1 fora do ar)
-mostra status real na tela Skills, não mais um array estático; o card de telemetria
-por modelo bate, por igualdade, com uma agregação manual dos mesmos eventos
-semeados.
+*Fronteira A1:* fixture com 2 servidores MCP (1 respondendo, 1 fora do ar) + 1
+`Rule` override persistida para um `mcp__<server>__<tool>` específico — a tela
+mostra status real + a política do tool com override como `allow`/`deny` (não
+"ask" constante) e um segundo tool sem override como "ask" — prova que o preview
+lê o engine real, não um default mudo.
+*Fronteira A5:* card bate por igualdade com agregação manual dos mesmos eventos
+semeados, incluindo a coluna `tier` derivada de `tier_from_id`.
 
-### Onda 8 — Verify (job em background, zero dependência)
+### Onda 8 — Mapa de memória do squad + busca RAG *(depende de Onda 1 + Onda 3)*
+
+A3. `schemas/proto/memory.proto` novo (`MemoryService{Health,Recall,List}` — sem
+`Remember`, quem grava é só o orquestrador via chamada direta) servido por
+`python/packages/forge-squad/src/forge_squad/memory_server.py` novo (mirror de
+`server.py`, supervisão **singleton**, não pool — leitura de memória é
+stateless/barata, misturar com o pool de squad da Onda 3 faria uma consulta
+disputar recurso com uma execução de squad real à toa). `memory.py` ganha
+`list_memories(agent?, limit)` público (reusa `_load_corpus()` já existente,
+zero lógica nova). `crates/forge-sidecar/src/memory_client.rs` novo (mirror de
+`SidecarClient`, reusa `SidecarError`/`socket_ready`). Rota no router de
+`forge-cli`: `GET /api/memory?agent=&limit=` + `POST /api/memory/recall
+{query,k}`; `SidecarError::Unavailable` → `503` explícito (mesmo padrão de
+degradação do PromptForge).
+
+**Por que um serviço novo, não os RPCs já declarados:** `CoreService.Recall`/
+`Remember` (`core.proto:18-19`) estão `unimplemented!` (`core_server.rs:
+111-121`) e são a direção errada — `CoreService` é servido pelo Rust, chamado
+pelo Python; o dado de memória mora no Python. O próprio protótipo do handoff
+erra isso (cita "CoreService.Recall" na cópia de loading) — a tela real corrige,
+não repete o engano. Não estender `SquadService`: quebra o precedente de
+um-proto-por-concern do repo e acopla disponibilidade de leitura ao pool de
+squad.
+
+**Não-escopo explícito (achado novo):** `forge_squad/forgetting.py`
+(`IntelligentForgetting.adaptive_forget`, `MemoryStore`) é código morto — só o
+próprio teste unitário chama, nunca `memory.py`/`orchestrator.py`/`server.py`
+(mesma classe do achado `max_autonomy_level`). O painel "memória por agente" da
+tela real **não** mostra tendência de esquecimento (o protótipo mostra, mas
+nada no código computa isso) — só `agent`, contagem real, e a decisão de maior
+confiança/mais recente.
+
+Copy da tela mantém a tensão honesta do próprio handoff: rótulo/nav dizem "RAG",
+mas rodapé e estado vazio dizem explicitamente "recuperação léxica TF-IDF, não
+semântica" (`recall.py`, ADR 0013).
+
+*Decisões→ADR 0022:* por que `MemoryService` novo (não o stub abandonado
+`CoreService.Recall/Remember`, direção errada; não `SquadService` estendido);
+por que Python segue dono do dado; compromisso de honestidade léxico-não-
+semântico na UI; descope explícito do `forgetting.py`.
+
+*Fronteira:* sidecar de memória real sobe, `POST /api/memory/recall` com ground
+truth de 2 tópicos de vocabulário disjunto recupera exatamente as memórias do
+tópico certo (mesmo padrão da Fase 6 Onda 6); sidecar morto (`SIGKILL`) → `503`
+explícito, não tela travada; `GET /api/memory` sem filtro agrupa por agente com
+contagem/decisão real, nenhum campo fabricado.
+
+### Onda 9 — Experimentos A/B
+
+A2. `GET /api/experiment/:nome` direto em `forge-server` (mesma classe de
+posicionamento de A5 — só `forge-store`+`forge-schemas`); 404 se
+`experiment_variants` devolve <2 variantes, 422 se alguma tem 0 amostras
+(espelha a validação do CLI, `main.rs:178,203`); `Json(report)` direto, zero DTO
+novo (`ExperimentReport`/`VariantStats` já derivam `Serialize`+`JsonSchema`).
+Banner obrigatório com a cópia já redigida no handoff ("atribuição por
+telemetria ainda em instrumentação — dados semeados"); **sem** instrumentar
+produção nesta fase — não-escopo explícito, não descuido. Retarget de
+`Sugestoes.tsx:11` (`relatedScreen: 'prompts'` → `'experimentos'`, tag "✓
+entregue").
+
+Sem ADR novo (usa `experiment.v1`/ADR 0014 já existente).
+
+*Fronteira:* seed com exatamente 2 variantes (n≥20 cada) → veredito bate com
+`two_proportion_p_value` calculado à parte; seed com 1 variante só → 422; nome
+inexistente → 404.
+
+### Onda 10 — Rate limits + Sandbox & skills de terceiro + Language servers
+
+3 telas pequenas, admin, independentes entre si (A4, A6, A7).
+
+- **A4** (direto em `forge-server` — reusa a dependência já existente de
+  `forge-llm`, hoje só usada pelo bin `loadgen`): `GET /api/ratelimit` — DTO
+  `{tier,models,cap,window_secs}` sobre `for_tier()`; banner "uso ilustrativo —
+  `poll` é privado e muta ao checar" (`rate_limit.rs:59,70`). Getter de uso, se
+  construído, é método **separado e não-mutante** (só poda + conta o deque,
+  nunca chama `poll()`) com teste dedicado provando efeito colateral zero — não
+  é obrigatório para a onda fechar. Reusa a mesma leitura de tetos que a Onda 12
+  (Providers) já planeja — construir uma vez.
+- **A6** (router de `forge-cli` — precisa de `forge-tools`): `GET /api/sandbox`
+  — perfil (`Sandbox::new` + as constantes hardcoded de `run_with`: rootfs
+  read-only, cap-drop ALL, no-new-privileges, documentadas como constantes) +
+  `Sandbox::ping()` novo (só `docker.ping()`, sem o resto de `run_with`) + a
+  lista de skills de terceiro de `/api/skills` (já real). Tela **read-only** —
+  o protótipo do handoff não tem handler nenhum de instalar/vetar/habilitar/
+  remover.
+- **A7** (router de `forge-cli` — precisa de `forge-tools`): `GET /api/lsp` —
+  enumera `.forge/lsp.toml` (mirror do parsing de `load_lsp_servers`), **zero
+  probe sob demanda** (quebraria a propriedade que `skills.rs:463-479` já prova
+  segura); status/diagnósticos refletem só uso real já ocorrido na sessão.
+
+Sem ADR novo (mecânico, mesma classe de "serialização do /verify"/"paginação do
+ledger").
+
+*Fronteira A4:* tetos batem com `for_tier()` para os 3 tiers; se o getter
+existir, teste "consultar 2× não move o contador" prova ausência de efeito
+colateral.
+*Fronteira A6:* fixture sem daemon Docker → `ping()` honesto `false`, tela
+mostra fail-closed, não "rodou".
+*Fronteira A7:* `.forge/lsp.toml` com comando inexistente → tela mostra
+"declarado, não iniciado" sem nenhum processo subir (mesma prova do teste
+existente).
+
+### Onda 11 — Verify (job em background, zero dependência)
 
 `POST /api/verify/run` roda `run_pipeline` em `spawn_blocking`, devolve `run_id`;
 `GET /api/verify/:id` via polling (hook `usePolling` já existe). Callback de
@@ -351,19 +559,23 @@ M" conforme completam, termina no veredito certo — prova progresso real, não
 placeholder. Segundo teste: dois `POST /api/verify/run` em sequência rápida — o
 segundo recebe `409` com o `run_id` do primeiro, não um job novo.
 
-### Onda 9 — Providers (piso leitura real; mutação como degrau)
+### Onda 12 — Providers (piso leitura real; mutação como degrau)
 
 Piso = view real de providers configurados + limites por tier (zero engenharia
-nova). Degrau = reordenar fallback consumindo o `FallbackChain` já existente (hoje
-morto), introspecção+ajuste de teto no `RateLimiter` (precisa de API de mutação
-nova).
+nova) — **reusa a leitura de tetos por tier que a Onda 10/A4 já constrói**, não
+reconstruir. Degrau = reordenar fallback consumindo o `FallbackChain` já
+existente (hoje morto), introspecção+ajuste de teto no `RateLimiter` (precisa de
+API de mutação nova — se a Onda 10 já construiu o getter não-mutante, este
+degrau o reusa também). Quando A4 (Onda 10) for ao ar, `web/src/api/providers.ts`'s
+`RATE_LIMITS` fabricado (`:9-13`) é aposentado — não fica como segunda fonte de
+verdade discordante.
 
 *Fronteira (piso):* a tela reflete exatamente `Gateway::available()` e as
 constantes de tier — sem fabricar `used/cap`. *Fronteira (degrau, se entrar):*
 reordena via POST, dispara com `ScriptedGenerator` (um provider falha de propósito)
 e confere que a ordem de tentativa observada é a nova, não a antiga.
 
-### Onda 10 — Modelo & Onboarding
+### Onda 13 — Modelo & Onboarding
 
 Modelo/agente = parâmetro por sessão/tarefa (mirroring do CLI — sem store de
 preferência novo, ver princípio de recorte em §1). `GET /api/doctor` agrega
@@ -382,7 +594,7 @@ negativo, não "tudo verde" sempre). Se autonomia entrar: dois `SquadTask` com
 `max_autonomy_level` diferentes produzem **comportamento diferente** (aprovação
 pedida num caso, não no outro) — não só "o campo viajou".
 
-### Onda 11 — Designer (salvar honesto)
+### Onda 14 — Designer (salvar honesto)
 
 `POST /api/designer/workflow` valida contra `squad.workflow.v1` novo (JSON Schema +
 tipo Rust + fixture golden, padrão de `experiment.v1`) e grava no ledger
@@ -395,13 +607,19 @@ nesta fase.**
 com caso inválido); grafo malformado (aresta para nó inexistente) é rejeitado com
 erro claro, não salvo silenciosamente.
 
-### Onda 12 — Fecho
+### Onda 15 — Fecho
 
 README/CLAUDE.md/PLANO-PLATAFORMA-FORGE.md declaram a Fase 7 concluída (ou o estado
-honesto do que ficou — nomeadamente autonomia, se descoped); ADRs 0015+ citados;
-flag `--web-agent` vira default; reconciliação explícita do `LEVANTAMENTO-UI-DESIGNER.md`
-(Grupo B fechado, Grupo A permanece próximo trabalho de design salvo as 2 exceções
-já fechadas na Onda 7).
+honesto do que ficou — nomeadamente autonomia, se descoped); ADRs 0015-0022
+citados; flag `--web-agent` vira default; reconciliação explícita do
+`LEVANTAMENTO-UI-DESIGNER.md` — **Grupo B fechado e Grupo A fechado 7/7** (não mais
+2/7 com exceção).
+
+**Descopes explícitos registrados nos documentos, não só no código:**
+`max_autonomy_level` (já existente na Fase 7 original) **e** `forgetting.py`/a
+coluna de tendência de esquecimento em A3 (achado desta emenda). Confirma que
+`Sugestoes.tsx` não tem mais cartões "proposto" para telas que já viraram reais
+(A2/A3 retargetados nas Ondas 8-9).
 
 **Critério mecânico de pronto:** `grep simulateLatency web/src/api` vazio (sobra só
 em fixture de teste) — adicionado à verificação desde o início da fase, não só
@@ -427,8 +645,14 @@ segue com sua nota de superseded, sem conteúdo divergente deste documento.
 - **0020** — topologia de processo (código novo em `forge-cli`, router aditivo,
   flag de opt-in) e teto de sessões vivas simultâneas (429 acima do limite).
 - **0021** — escopo da autonomia progressiva nesta fase (`max_autonomy_level`).
+- **0022** — `MemoryService` (ponte Rust↔Python para memória do squad, Onda 8):
+  por que um serviço novo em vez de reviver `CoreService.Recall/Remember` (stub
+  abandonado, direção errada) ou estender `SquadService` (quebra o precedente de
+  um-proto-por-concern, acopla ao pool de squad); por que Python continua dono
+  do dado; supervisão singleton, não pool; compromisso de honestidade
+  "léxico, não semântico" carregado para a UI.
 
-Schema novo: `squad.workflow.v1` (Designer, Onda 11).
+Schema novo: `squad.workflow.v1` (Designer, Onda 14).
 
 Decisões mais mecânicas (serialização de execuções concorrentes do `/verify`,
 paginação/filtro do ledger, remoção do fallback mock de `skills.ts`) não geram ADR
@@ -444,34 +668,50 @@ fronteira.
 | Resolver síncrono em `tokio::spawn` comum esgota worker-threads sob N sessões | Sempre `spawn_blocking` por sessão viva + teto de sessões simultâneas (ADR 0020) |
 | Pedido de permissão se perde se o navegador fechar antes de resolver | Estado do pedido vive no servidor, reemitido a quem conectar depois (snapshot-then-live, ADR 0016) |
 | Duas abas na mesma sessão corrompem histórico | Sessão = ator único, turnos serializados, erro claro na 2ª escrita concorrente |
-| Duas execuções de `/verify` disputam o mesmo `target/` e workspace | Um job por vez; segundo POST recebe `409` com o `run_id` corrente (Onda 8) |
+| Duas execuções de `/verify` disputam o mesmo `target/` e workspace | Um job por vez; segundo POST recebe `409` com o `run_id` corrente (Onda 11) |
 | Sidecar Python não sobrevive a servidor de longa duração | Supervisor-serviço dedicado (Onda 3), testado com `SIGKILL`, antes de Squad/Prompts depender |
 | Fase 7 quebra o `forge-server` hoje estável/em produção (túnel SSH) | Código novo em `forge-cli`, zero dep nova em `forge-server`, flag opt-in até o fecho |
 | `max_autonomy_level` vira wiring de fachada (campo viaja, Python ignora) | Escopo explícito (ADR 0021); fronteira exige provar comportamento diferente |
 | Suíte e2e real não roda em CI, regressão passa despercebida | Job `web` já na Onda 1, não no fecho |
-| Grupo A entra de carona e infla o escopo | Não-escopo explícito, com 2 exceções deliberadas e nomeadas (Onda 7) |
-| Verify (8.5min) parece travado sem sinal de progresso | Progresso por passo desde o primeiro corte da Onda 8 |
+| Grupo A vira scope creep além das 7 telas do handoff/levantamento | Escopo travado nas 7 telas nomeadas (A1-A7); nenhuma 8ª tela entra por composição tácita |
+| Verify (8.5min) parece travado sem sinal de progresso | Progresso por passo desde o primeiro corte da Onda 11 |
 | Afrouxar permissão pelo navegador sem rastro do que mudou | Toda mutação de `Rule` vira entrada no ledger + lista de revogação na UI (Onda 2) |
 | Dois planos de integração vivos contam histórias diferentes | Este documento substitui `PLANO-INTEGRACAO-FRONTEND.md`, que recebe nota de superseded na mesma entrega |
+| Getter de uso do `RateLimiter` chama `poll()` e consome vaga real só de abrir a tela | Método novo, separado, não-mutante; teste dedicado provando efeito colateral zero (Onda 10) |
+| Botão/probe sob demanda no LSP força o lazy-start só para checar status | Escopo explícito: zero probe, só config declarada + uso real já ocorrido (Onda 10) |
+| A3 vira uma ponte gRPC nova desproporcional à complexidade do problema | Reuso do padrão PromptForge (singleton, 503 fail-closed honesto); decisão registrada em ADR 0022 |
+| Painel de memória mostra tendência de esquecimento fabricada (`forgetting.py` é código morto) | Coluna de decay explicitamente fora da tela (Onda 8) |
+| Protótipo do handoff cita o RPC errado (`CoreService.Recall`) e a implementação repete o engano | Corrigido na Onda 8: `MemoryService.Recall`, não `CoreService.Recall` |
+| Mock antigo de MCP (`Skills.tsx`) coexiste com a tela nova, 2 fontes de verdade discordantes | Remoção obrigatória listada na Onda 7, não só adição |
+| `providers.ts`'s `RATE_LIMITS` fabricado sobrevive depois que A4 é real | Aposentado explicitamente quando A4 for ao ar (nota cross-onda na Onda 12) |
 
 ## 5. Sequência e paralelismo
 
 Zero dependência entre si, podem rodar em paralelo desde o dia 1: Onda 3
-(sidecar-serviço), Onda 5-CRUD (Prompts), Onda 6 (Ledger), Onda 7 (MCP + telemetria
-por modelo), Onda 8 (Verify), Onda 9 (Providers), Onda 10 sem autonomia, Onda 11
+(sidecar-serviço), Onda 5-CRUD (Prompts), Onda 6 (Ledger), Onda 7 (Console MCP +
+Uso por modelo — A1 soft-depende de Onda 2 para o preview de política, A5 não
+depende de nada), Onda 9 (Experimentos A/B), Onda 10 (Rate limits + Sandbox +
+LSP), Onda 11 (Verify), Onda 12 (Providers), Onda 13 sem autonomia, Onda 14
 (Designer). Onda 1→2 é a única cadeia dura. Onda 4 depende de 1+3. Onda 5-render
-depende só de 3. Onda 12 é sempre última, e só depois da decisão de autonomia (Onda
-10) estar resolvida ou formalmente re-declarada.
+depende só de 3. Onda 8 (Memória/RAG) depende de 1+3. Onda 15 é sempre última, e
+só depois da decisão de autonomia (Onda 13) estar resolvida ou formalmente
+re-declarada.
 
 ## Verificação
 
-- O documento cobre as 11 lacunas do inventário de Grupo B, as 2 exceções de Grupo A
-  (Onda 7), as 12 ondas + fecho, as 7 ADRs previstas, e a tabela de riscos.
-- `grep -nE "Onda ([1-9]|1[012])" docs/PLANO-FASE-7-frontend-primario.md` lista as
-  12 ondas na ordem esperada.
-- `grep -n "Grupo A" docs/PLANO-FASE-7-frontend-primario.md` confirma o não-escopo
-  explícito e suas 2 exceções nomeadas.
+- O documento cobre as 11 lacunas do inventário de Grupo B, as 7 telas de Grupo A
+  (A1-A7, fechadas 7/7), as 15 ondas + fecho, as 8 ADRs previstas (0015-0022), e a
+  tabela de riscos.
+- `grep -nE "^### Onda ([1-9]|1[0-5]) " docs/PLANO-FASE-7-frontend-primario.md`
+  lista as 15 ondas na ordem esperada.
+- `grep -n "Grupo A" docs/PLANO-FASE-7-frontend-primario.md` confirma o
+  fechamento 7/7, não mais a lista de exceções únicas.
 - `grep -n "max_autonomy_level" docs/PLANO-FASE-7-frontend-primario.md` confirma o
   achado do dado morto está registrado, não escondido.
+- `grep -n "forgetting.py\|MemoryService\|CoreService.Recall" docs/PLANO-FASE-7-frontend-primario.md`
+  confirma o achado de código morto do Grupo A e a correção de direção do RPC
+  estão registrados, não escondidos.
+- `grep -n "ADR 0022" docs/PLANO-FASE-7-frontend-primario.md` confirma a nova ADR
+  está referenciada onde a Onda 8 a cita.
 - `grep -n "Origin" docs/PLANO-FASE-7-frontend-primario.md` confirma a guarda de
   CSRF/DNS-rebinding está na Onda 1, não differida.
