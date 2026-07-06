@@ -1,10 +1,13 @@
 """Memória persistente de agentes (migrado de BuildToValue
 `src/memory/agent_memory.py`). Curto/longo prazo + episódica em disco.
 
-`chromadb` é opcional — sem ele, degrada graciosamente para um fallback
-em memória (mesmo princípio de degradação graciosa do sidecar Rust).
-Diretório de armazenamento segue a convenção `.forge/` do resto da
-plataforma (era `.buildtoflip/ledger` na origem).
+`chromadb` é opcional — sem ele, o **corpus episódico em disco** (o JSONL) é a
+fonte da verdade. A recuperação (`recall_similar`) é feita por um índice TF-IDF
+local (`recall.py`, Fase 6 Onda 6), **não mais** pelo `_FallbackCollection` — que
+era um no-op (devolvia listas vazias sempre). O ramo chromadb permanece como
+sink alternativo (inativo enquanto a dep não for declarada), mas o recall não
+depende mais dele. Diretório de armazenamento segue a convenção `.forge/` do
+resto da plataforma (era `.buildtoflip/ledger` na origem).
 """
 
 from __future__ import annotations
@@ -13,6 +16,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from . import recall
 
 try:
     import chromadb
@@ -82,7 +87,45 @@ class AgentMemorySystem:
             ids=[f"{agent}_{memory['timestamp']}"],
         )
 
-    def recall_similar(self, query: str, k: int = 5) -> dict[str, Any]:
-        """Recupera memórias similares via banco vetorial (ou fallback)."""
+    def _load_corpus(self) -> list[dict[str, Any]]:
+        """Lê o corpus episódico do disco (JSONL). É a fonte da verdade do
+        recall — persiste entre sessões e já contém o que foi lembrado nesta
+        (o `remember_decision` grava na hora). Linhas malformadas são puladas."""
+        if not self.episodic_path.exists():
+            return []
+        records: list[dict[str, Any]] = []
+        with self.episodic_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and "decision" in rec:
+                    records.append(rec)
+        return records
 
-        return self.collection.query(query_texts=[query], n_results=k)
+    def recall_similar(self, query: str, k: int = 5) -> dict[str, Any]:
+        """Recupera as `k` memórias mais similares à `query` por TF-IDF-cosseno
+        sobre o corpus episódico (Fase 6 Onda 6 — recuperação real, substitui o
+        no-op). Devolve listas paralelas (`ids`/`documents`/`metadatas`/`scores`)
+        das relevantes, em ordem decrescente de relevância; vazio se nada casa."""
+        corpus = self._load_corpus()
+        docs = [json.dumps(rec.get("decision", {}), ensure_ascii=False) for rec in corpus]
+        ranked = recall.rank(query, docs, k)
+        return {
+            "ids": [
+                f"{corpus[i].get('agent', '?')}_{corpus[i].get('timestamp', i)}"
+                for i, _ in ranked
+            ],
+            "documents": [docs[i] for i, _ in ranked],
+            "metadatas": [
+                {"agent": corpus[i].get("agent"), "timestamp": corpus[i].get("timestamp")}
+                for i, _ in ranked
+            ],
+            "scores": [score for _, score in ranked],
+            "query": [query],
+            "n_results": k,
+        }

@@ -101,4 +101,49 @@
   loop, não um painel. Sem trabalho de UI nesta onda.
 - **[nota] rust-analyzer é uma componente do rustup**, não vem por padrão. O job
   `sandbox` do CI roda `rustup component add rust-analyzer` antes do
-  `--include-ignored`. Local: idem para exercitar o caminho real.
+  `--include-ignored`. Local: idem para exercitar o caminho real. **Resolvido:**
+  passou no CI (PR #15, merge 03ce513) — o log do job `sandbox` mostra os dois
+  testes reais `... ok`, `0 ignored`.
+
+## Onda 6 — RAG (recuperação semântica da memória)
+
+- **[decisão — vai ao ADR da Onda 9] Embedder = TF-IDF local léxico, zero-dep.**
+  O ambiente Python NÃO tem nenhuma lib de ML (sem numpy/sklearn/sentence-
+  transformers/torch/chromadb — chromadb nunca foi dep declarada). Escolhi um
+  índice **TF-IDF esparso em puro Python** (`recall.py`, só stdlib) sobre embeddings
+  neurais porque: (a) **offline-first** de verdade (nada sai da máquina, sem baixar
+  modelo), (b) zero-dependência (não infla `uv.lock` nem arrisca supply-chain),
+  (c) o boundary rule (ADR 0001) permite computação **local** no Python — só
+  proíbe chamar *provedores LLM*/ter keys lá. É recuperação **real** (substitui o
+  no-op provado), mas **léxica**, não neural: casa por termos distintivos, não por
+  sinônimo/paráfrase. **Honestidade:** um teste (`test_topico_oposto`) inicialmente
+  falhou justamente porque "sandbox" e "contêiner/docker" são sinônimos que o
+  TF-IDF não liga — reescrevi a ground truth para relevância determinável
+  lexicalmente (o teste justo para um retriever léxico) e documentei o limite.
+- **[dúvida — para o seu olhar] Léxico é suficiente para "semântico"?** O PLANO
+  diz "recuperação semântica". TF-IDF é o teto honesto sem um modelo local
+  (embeddings neurais exigiriam bundlar um modelo — conflita com offline/leveza —
+  ou passar pelo gateway Rust `CoreService.Generate`, o que viraria uma chamada de
+  rede por recall). Entreguei o retriever real e leve; **upgrade para embeddings
+  neurais é uma onda/ADR futura** se você quiser semântica de sinônimo. Anotado
+  como a decisão do "ADR do embedder do RAG (Onda 6)" que a Onda 9 formaliza.
+- **[decisão] O índice vive derivado do corpus persistido (`.forge/squad-memory/
+  agent_memories.jsonl`).** O JSONL episódico é a fonte da verdade; o índice
+  TF-IDF é reconstruído a cada `recall_similar` (corpus pequeno — dezenas/
+  centenas; custo desprezível). Funciona **entre sessões** (o JSONL persiste) e
+  dentro da sessão (o `remember_decision` grava na hora). **Futuro:** índice
+  materializado/incremental se o corpus crescer muito.
+- **[decisão] Fronteira = correção da recuperação, não consumo no orquestrador.**
+  A fronteira do PLANO é "o recall recupera exatamente as k relevantes" — provei
+  com ground-truth de 2 tópicos disjuntos (igualdade de conjunto) + o corpus
+  vazio honesto + o caminho antes-vazio agora recuperando. O `orchestrator.py:107`
+  já chamava `recall_similar` e registrava a contagem (`context_recall_count`,
+  antes **sempre 0** pelo no-op; agora real). **Deixei o orquestrador intacto**:
+  alimentar o contexto recuperado no *planejamento/prompts* é uma decisão de
+  raciocínio do squad (como memórias passadas devem influenciar o plano?), fora
+  desta fronteira — follow-up scoped, não mexi na lógica delicada de consenso.
+- **[decisão] Scaffolding chromadb mantido, inativo.** `remember_decision` ainda
+  chama `self.collection.add` (o `_FallbackCollection` no-op) — o recall não
+  depende mais dele (lê o JSONL). Não removi o ramo chromadb (é um sink
+  alternativo para um futuro vector DB real); documentei que está inativo. Limpeza
+  ou fiação a um vector DB de verdade é candidata à Onda 9 ou onda futura.
