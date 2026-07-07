@@ -7,22 +7,165 @@
 use crate::session::{now_rfc3339, Session};
 use crate::{run_once, RunOpts};
 use anyhow::Result;
+use forge_core::{Decision, PermissionEngine};
 use forge_llm::chat::{ChatMessage, GenerateRequest};
 use forge_llm::Generator;
-use forge_proto::core::PermissionRequest;
+use forge_proto::core::{PermissionRequest, ToolCall, ToolResult};
 use forge_proto::llm::{LlmRequest, Usage};
 use forge_proto::squad::{squad_event, SquadTask};
 use forge_sidecar::{serve_core, CoreBackend, SquadRun, SquadSupervisor};
+use forge_tools::ToolRegistry;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// `ToolResult.exit_code`: convenção compartilhada pelos três `CoreBackend`
+/// de produção (ver `core_run_tool`). `0` = sucesso; `1` = erro de
+/// execução/args inválidos/ferramenta desconhecida (nunca rodou, ou rodou e
+/// falhou — vale tentar de novo com outra entrada); `-1` = negado pelo
+/// motor de permissões ou por um humano (nunca chegou a executar — não
+/// adianta repetir a mesma ação).
+pub(crate) const TOOL_EXIT_OK: i32 = 0;
+pub(crate) const TOOL_EXIT_ERROR: i32 = 1;
+pub(crate) const TOOL_EXIT_DENIED: i32 = -1;
+
+/// `CoreBackend::run_tool` de verdade, compartilhado pelos três backends de
+/// produção (CLI, web, scripted). Recalcula o escopo a partir de
+/// `args_json` via `Tool::scope` — o `ToolCall.scope` vindo da rede NUNCA é
+/// usado na decisão de permissão (só o Rust decide escopo; um Python
+/// bugado/comprometido não pode declarar um escopo mais permissivo que o
+/// real). Avalia via `PermissionEngine`; no caso `Ask`, delega a decisão a
+/// `ask` (o mesmo bridge de HITL que o backend já usa para
+/// `request_permission` — stdin no CLI, `SquadHub::request_hitl` na web).
+/// A execução síncrona (`tool.run`) roda dentro de `spawn_blocking`; a
+/// checagem de permissão (incluindo o `Ask` assíncrono) fica fora — não
+/// bloqueia uma worker-thread do reactor esperando um clique humano.
+/// Registra cada chamada no ledger de `root` (best-effort — falha de
+/// ledger nunca derruba a execução da ferramenta).
+pub(crate) async fn core_run_tool<F, Fut>(
+    tools: &Arc<ToolRegistry>,
+    permissions: &PermissionEngine,
+    call: &ToolCall,
+    root: &Path,
+    ask: F,
+) -> ToolResult
+where
+    F: FnOnce(PermissionRequest) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let args: serde_json::Value = match serde_json::from_str(&call.args_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return ToolResult {
+                content: format!("args_json inválido: {e}"),
+                truncated: false,
+                exit_code: TOOL_EXIT_ERROR,
+            }
+        }
+    };
+    if tools.get(&call.tool).is_none() {
+        return ToolResult {
+            content: format!("ferramenta desconhecida: {}", call.tool),
+            truncated: false,
+            exit_code: TOOL_EXIT_ERROR,
+        };
+    }
+    let scope = tools.get(&call.tool).expect("validado acima").scope(&args);
+
+    let allowed = match permissions.evaluate(&call.tool, &scope) {
+        Decision::Allow => true,
+        Decision::Deny => false,
+        Decision::Ask => {
+            ask(PermissionRequest {
+                tool: call.tool.clone(),
+                scope: scope.clone(),
+                reason: format!("squad pede '{}' em {scope:?}", call.tool),
+                confidence: 0.0,
+            })
+            .await
+        }
+    };
+    if !allowed {
+        let result = ToolResult {
+            content: format!("permissão negada para {} em {scope:?}", call.tool),
+            truncated: false,
+            exit_code: TOOL_EXIT_DENIED,
+        };
+        log_tool_run(root, call, &scope, &result);
+        return result;
+    }
+
+    let tools_for_blocking = Arc::clone(tools);
+    let tool_name = call.tool.clone();
+    let run_result = tokio::task::spawn_blocking(move || {
+        let tool = tools_for_blocking
+            .get(&tool_name)
+            .expect("validado antes do spawn_blocking");
+        tool.run(&args)
+    })
+    .await;
+
+    let result = match run_result {
+        Ok(Ok(out)) => {
+            let mut content = out.content;
+            if out.truncated {
+                match &out.overflow_path {
+                    Some(path) => content.push_str(&format!(
+                        "\n[output truncado; completo em {path} — use read para consultar]"
+                    )),
+                    None => content.push_str("\n[output truncado]"),
+                }
+            }
+            ToolResult {
+                content,
+                truncated: out.truncated,
+                exit_code: TOOL_EXIT_OK,
+            }
+        }
+        Ok(Err(e)) => ToolResult {
+            content: e.to_string(),
+            truncated: false,
+            exit_code: TOOL_EXIT_ERROR,
+        },
+        Err(e) => ToolResult {
+            content: format!("falha interna ao rodar ferramenta: {e}"),
+            truncated: false,
+            exit_code: TOOL_EXIT_ERROR,
+        },
+    };
+    log_tool_run(root, call, &scope, &result);
+    result
+}
+
+/// Best-effort — nunca deixa uma falha de ledger derrubar a resposta do
+/// `RunTool` (mesma postura de `Session::note`).
+fn log_tool_run(root: &Path, call: &ToolCall, scope: &str, result: &ToolResult) {
+    if let Err(e) = crate::session::append_entry(
+        root,
+        "forge-cli:squad-tool",
+        "squad.tool_run",
+        json!({
+            "tool": call.tool,
+            "scope": scope,
+            "exit_code": result.exit_code,
+            "truncated": result.truncated,
+        }),
+    ) {
+        eprintln!("  [ledger] falha ao registrar squad.tool_run: {e}");
+    }
+}
+
 /// `CoreBackend` real: `Generate` passa pelo `Gateway` (streaming agregado),
-/// `RequestPermission` resolve HITL no terminal (ou auto-aprova com `--yes`).
+/// `RequestPermission` resolve HITL no terminal (ou auto-aprova com `--yes`),
+/// `RunTool` executa de verdade sob `ToolRegistry`/`PermissionEngine`
+/// ("tool execution architecture" — squad como executor).
 struct GatewayCoreBackend<G: Generator> {
     generator: Arc<G>,
     auto_yes: bool,
+    root: PathBuf,
+    tools: Arc<ToolRegistry>,
+    tool_permissions: PermissionEngine,
 }
 
 #[derive(serde::Deserialize)]
@@ -108,6 +251,17 @@ impl<G: Generator + Send + Sync + 'static> CoreBackend for GatewayCoreBackend<G>
         .await
         .unwrap_or(false)
     }
+
+    async fn run_tool(&self, call: &ToolCall) -> ToolResult {
+        core_run_tool(
+            &self.tools,
+            &self.tool_permissions,
+            call,
+            &self.root,
+            |req| async move { self.request_permission(&req).await },
+        )
+        .await
+    }
 }
 
 /// Localiza o workspace Python do sidecar: `FORGE_PYTHON_DIR`, senão um
@@ -153,6 +307,9 @@ pub async fn run_squad<G: Generator + Send + Sync + 'static>(
     let backend = GatewayCoreBackend {
         generator: generator.clone(),
         auto_yes: opts.yes,
+        root: root.to_path_buf(),
+        tools: Arc::new(ToolRegistry::default_set(root)),
+        tool_permissions: (forge_core::BUILD.permissions)(),
     };
     let core_task = tokio::spawn(serve_core(backend, core_sock.clone()));
     for _ in 0..100 {

@@ -1,13 +1,18 @@
 //! Servidor `CoreService` (`schemas/proto/core.proto`) — o lado Rust do
 //! laço bidirecional (Onda 4d). O sidecar Python do squad chama de volta
-//! `Generate` (LLM) e `RequestPermission` (HITL) enquanto executa.
+//! `Generate` (LLM), `RequestPermission` (HITL) e `RunTool` (execução real
+//! de ferramenta, ativada na "tool execution architecture" — squad como
+//! executor) enquanto executa.
 //!
-//! `Generate`/`RequestPermission` são atendidos por um [`CoreBackend`]
-//! injetável: em produção, o `Gateway` real (forge-cli) + um resolver de
-//! permissão; em teste, um backend roteirizado. Os demais RPCs do contrato
-//! (`RunTool`/`AppendLedger`/`Recall`/`Remember`) devolvem `Unimplemented`
-//! honestamente — o orquestrador atual não os chama (os agentes fazem uma
-//! única chamada de LLM e a memória é local ao Python).
+//! `Generate`/`RequestPermission`/`RunTool` são atendidos por um
+//! [`CoreBackend`] injetável: em produção, o `Gateway` real (forge-cli) +
+//! um `ToolRegistry`/`PermissionEngine` + um resolver de permissão; em
+//! teste, um backend roteirizado. `AppendLedger` devolve `Unimplemented`
+//! honestamente — não usado pelo orquestrador atual. `Recall`/`Remember`
+//! continuam dormentes de propósito, mas não por falta de tempo: são a
+//! direção errada para memória (`CoreService` é servido pelo Rust, chamado
+//! pelo Python; memória mora no Python) — superados pelo `MemoryService`
+//! novo, servido pelo Python (ADR 0022).
 
 use forge_proto::core::core_service_server::{CoreService, CoreServiceServer};
 use forge_proto::core::{
@@ -31,6 +36,11 @@ pub trait CoreBackend: Send + Sync + 'static {
     /// Decide uma permissão (true = ALLOW). Fail-closed é responsabilidade
     /// de quem implementa.
     async fn request_permission(&self, req: &PermissionRequest) -> bool;
+    /// Executa uma ferramenta. Nunca falha a RPC — negação do motor de
+    /// permissões ou erro de execução viram um `ToolResult` com o
+    /// `exit_code` apropriado, não um `Status` de transporte (mesmo
+    /// espírito de `generate`: erro de domínio vira payload).
+    async fn run_tool(&self, call: &ToolCall) -> ToolResult;
 }
 
 pub struct CoreServer<B: CoreBackend> {
@@ -96,9 +106,9 @@ impl<B: CoreBackend> CoreService for CoreServer<B> {
         }))
     }
 
-    async fn run_tool(&self, _: Request<ToolCall>) -> Result<Response<ToolResult>, Status> {
-        Err(Status::unimplemented(
-            "RunTool não usado pelo orquestrador atual (agentes fazem uma chamada de LLM)",
+    async fn run_tool(&self, request: Request<ToolCall>) -> Result<Response<ToolResult>, Status> {
+        Ok(Response::new(
+            self.backend.run_tool(&request.into_inner()).await,
         ))
     }
 

@@ -17,18 +17,20 @@
 //! Resolver isso de verdade (core_socket por slot + CoreService por slot)
 //! é escopo maior, deixado para uma onda futura.
 
-use crate::squad::{core_generate, locate_python_dir};
+use crate::squad::{core_generate, core_run_tool, locate_python_dir};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use forge_core::PermissionEngine;
 use forge_llm::gateway::Generator;
-use forge_proto::core::PermissionRequest;
+use forge_proto::core::{PermissionRequest, ToolCall, ToolResult};
 use forge_proto::llm::{LlmRequest, Usage};
 use forge_proto::squad::{squad_event, SquadEvent, SquadTask};
 use forge_sidecar::{serve_core, CoreBackend, SidecarError, SquadPool};
+use forge_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -176,11 +178,16 @@ impl SquadHub {
 
 /// `CoreBackend` real do agente web: `Generate` passa pelo `Gateway`/rate
 /// limit/cache (mesmo `core_generate` do `forge squad` CLI);
-/// `RequestPermission` resolve o gate via HTTP em vez de stdin.
+/// `RequestPermission` resolve o gate via HTTP em vez de stdin; `RunTool`
+/// executa de verdade sob `ToolRegistry`/`PermissionEngine` (mesmo
+/// `core_run_tool` do CLI).
 struct WebSquadCoreBackend<G: Generator> {
     generator: Arc<G>,
     hub: SquadHub,
     task_id: String,
+    root: PathBuf,
+    tools: Arc<ToolRegistry>,
+    tool_permissions: PermissionEngine,
 }
 
 #[tonic::async_trait]
@@ -192,6 +199,17 @@ impl<G: Generator + Send + Sync + 'static> CoreBackend for WebSquadCoreBackend<G
     async fn request_permission(&self, _req: &PermissionRequest) -> bool {
         self.hub.request_hitl(&self.task_id).await
     }
+
+    async fn run_tool(&self, call: &ToolCall) -> ToolResult {
+        core_run_tool(
+            &self.tools,
+            &self.tool_permissions,
+            call,
+            &self.root,
+            |_req| self.hub.request_hitl(&self.task_id),
+        )
+        .await
+    }
 }
 
 /// `CoreBackend` roteirizado (e2e sem API key, `FORGE_SCRIPTED=1`, mesmo
@@ -202,6 +220,9 @@ impl<G: Generator + Send + Sync + 'static> CoreBackend for WebSquadCoreBackend<G
 struct ScriptedSquadCoreBackend {
     hub: SquadHub,
     task_id: String,
+    root: PathBuf,
+    tools: Arc<ToolRegistry>,
+    tool_permissions: PermissionEngine,
 }
 
 #[tonic::async_trait]
@@ -236,6 +257,17 @@ impl CoreBackend for ScriptedSquadCoreBackend {
     async fn request_permission(&self, _req: &PermissionRequest) -> bool {
         self.hub.request_hitl(&self.task_id).await
     }
+
+    async fn run_tool(&self, call: &ToolCall) -> ToolResult {
+        core_run_tool(
+            &self.tools,
+            &self.tool_permissions,
+            call,
+            &self.root,
+            |_req| self.hub.request_hitl(&self.task_id),
+        )
+        .await
+    }
 }
 
 fn now_rfc3339() -> String {
@@ -254,7 +286,7 @@ async fn run_squad_task<B>(
     root: PathBuf,
     task_id: String,
     description: String,
-    backend_for: impl FnOnce(SquadHub, String) -> B,
+    backend_for: impl FnOnce(SquadHub, String, PathBuf, Arc<ToolRegistry>, PermissionEngine) -> B,
 ) where
     B: CoreBackend,
 {
@@ -289,7 +321,7 @@ async fn run_squad_task_inner<B>(
     root: PathBuf,
     task_id: String,
     description: String,
-    backend_for: impl FnOnce(SquadHub, String) -> B,
+    backend_for: impl FnOnce(SquadHub, String, PathBuf, Arc<ToolRegistry>, PermissionEngine) -> B,
 ) -> Result<(), String>
 where
     B: CoreBackend,
@@ -300,7 +332,17 @@ where
     // pool — nunca duas tarefas vivas ao mesmo tempo disputando o bind).
     let core_sock = forge_dir.join("squad-pool-core.sock");
 
-    let backend = backend_for(hub.clone(), task_id.clone());
+    // Construído uma vez aqui (não em cada closure de `backend_for`) —
+    // evita montar `ToolRegistry::default_set` duas vezes por variante.
+    let tools = Arc::new(ToolRegistry::default_set(&root));
+    let tool_permissions = (forge_core::BUILD.permissions)();
+    let backend = backend_for(
+        hub.clone(),
+        task_id.clone(),
+        root.clone(),
+        tools,
+        tool_permissions,
+    );
     let core_task = tokio::spawn(serve_core(backend, core_sock.clone()));
     for _ in 0..100 {
         if core_sock.exists() {
@@ -427,7 +469,13 @@ async fn run_squad_handler(
             root,
             task_id_for_task,
             body.task,
-            |hub, task_id| ScriptedSquadCoreBackend { hub, task_id },
+            |hub, task_id, root, tools, tool_permissions| ScriptedSquadCoreBackend {
+                hub,
+                task_id,
+                root,
+                tools,
+                tool_permissions,
+            },
         ));
     } else {
         let opts = crate::RunOpts {
@@ -454,10 +502,13 @@ async fn run_squad_handler(
             root,
             task_id_for_task,
             body.task,
-            move |hub, task_id| WebSquadCoreBackend {
+            move |hub, task_id, root, tools, tool_permissions| WebSquadCoreBackend {
                 generator,
                 hub,
                 task_id,
+                root,
+                tools,
+                tool_permissions,
             },
         ));
     }

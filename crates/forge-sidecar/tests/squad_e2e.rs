@@ -9,7 +9,7 @@
 //! Rust para cada agente e streama os eventos de volta. Pulado (sem
 //! falhar) se `uv`/workspace Python ausentes — como `python_sidecar.rs`.
 
-use forge_proto::core::PermissionRequest;
+use forge_proto::core::{PermissionRequest, ToolCall, ToolResult};
 use forge_proto::llm::{LlmRequest, Usage};
 use forge_proto::squad::{handoff, squad_event, SquadEvent, SquadTask};
 use forge_sidecar::{drain_stream, serve_core, CoreBackend, SquadRun, SquadSupervisor};
@@ -56,6 +56,18 @@ impl CoreBackend for ScriptedCore {
 
     async fn request_permission(&self, _req: &PermissionRequest) -> bool {
         true
+    }
+
+    // Estes dois testes não roteirizam nenhuma ação de ferramenta (o plano
+    // roteirizado do "planner" nunca gera um passo "implement" com
+    // tool_call) — RunTool nunca é chamado aqui. `ScriptedCoreWithTools`
+    // (Onda 3, no fechamento) é quem exercita RunTool de verdade.
+    async fn run_tool(&self, _call: &ToolCall) -> ToolResult {
+        ToolResult {
+            content: "ScriptedCore não executa ferramentas".into(),
+            truncated: false,
+            exit_code: 1,
+        }
     }
 }
 
@@ -199,6 +211,14 @@ impl CoreBackend for SlowCore {
     }
     async fn request_permission(&self, _req: &PermissionRequest) -> bool {
         true
+    }
+
+    async fn run_tool(&self, _call: &ToolCall) -> ToolResult {
+        ToolResult {
+            content: "SlowCore não executa ferramentas".into(),
+            truncated: false,
+            exit_code: 1,
+        }
     }
 }
 
