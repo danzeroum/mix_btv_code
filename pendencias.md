@@ -1341,3 +1341,24 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   pelo parecer (e que endosso): `forge squad "crie X.html..."` produzindo
   `X.html` real no workspace, registrado no ledger, com o auditor julgando
   sobre um artefato que existe — não sobre uma alegação de texto.
+- **[resolvido] Onda 1 (RunTool) + Onda 2 (loop ReAct) + Onda 3 (evidência
+  real ao auditor) fechadas — ADR 0023.** `RunTool` ativado no Rust
+  (`core_run_tool`, os três `CoreBackend` de produção); `DeveloperAgent.
+  _implement_with_tools` é o loop ReAct real; o gate duro em
+  `auditor.py` reprova "completed" sem evidência de escrita ANTES do
+  gateway ser chamado. Dois achados reais durante a implementação, não
+  previstos no parecer original: (1) o caminho paralelo do orquestrador
+  (`_extract_parallel_tasks`, disparado por qualquer passo "implement"
+  sem `dependencies` — o caso comum) chamava o developer sem `"action"`,
+  então o sinal de ativação do loop ReAct nunca disparava ali — corrigido
+  antes de virar uma regressão silenciosa; (2) `core_generate` só tratava
+  o papel `"system"`, colapsando `"assistant"` em `Role::User` — o loop
+  ReAct é o primeiro caller a mandar histórico multi-turno de verdade e
+  teria esbarrado nisso contra um provider real. Definição de pronto
+  provada ponta a ponta com processo Python real, sem key
+  (`crates/forge-sidecar/tests/squad_e2e.rs::
+  squad_cria_arquivo_real_via_run_tool_ledger_e_auditor_veem_evidencia`):
+  o arquivo existe no workspace, o ledger tem `squad.tool_run`, e o
+  `StepResult{step_id:"final_validation"}` aprovado é observável fora do
+  retorno Python que `server.py` descartava. Detalhes completos e o
+  raciocínio de cada decisão em `docs/adr/0023-runtool-ativado-squad-como-executor.md`.

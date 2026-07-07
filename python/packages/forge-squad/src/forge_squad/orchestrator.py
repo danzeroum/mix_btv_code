@@ -24,6 +24,7 @@ Adaptações registradas nos ADRs, aplicadas neste porte:
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -163,6 +164,28 @@ class UnifiedOrchestrator:
                 execution_results, evidence=task.get("verification_evidence")
             )
         overall_success = bool(final_validation.get("approved", False))
+
+        # Onda 3 ("tool execution architecture"): sem isto, o veredito final
+        # (calculado sobre evidência real de tool_calls) não era observável
+        # em nenhum lugar fora do dict de retorno que `server.py` descarta
+        # (`run()`, ExecuteTask) — inobservável mesmo depois de RunTool/loop
+        # ReAct existirem. Reusa StepResult (`kind: "step"`), zero mudança
+        # de proto; `step_id` fixo distingue este evento de um passo real.
+        await self._emit(
+            {
+                "kind": "step",
+                "step_id": "final_validation",
+                "success": overall_success,
+                "summary": json.dumps(
+                    {
+                        "approved": overall_success,
+                        "confidence": final_validation.get("confidence"),
+                        "issues": final_validation.get("issues", []),
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        )
 
         # ADR 0006: o portão não registra mais; quem executa registra o
         # resultado REAL da execução (a menos que já tenha sido rejeitado

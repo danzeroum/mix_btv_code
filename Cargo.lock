@@ -876,6 +876,8 @@ version = "0.1.0"
 dependencies = [
  "forge-core",
  "forge-proto",
+ "forge-schemas",
+ "forge-store",
  "forge-tools",
  "hyper-util",
  "libc",
