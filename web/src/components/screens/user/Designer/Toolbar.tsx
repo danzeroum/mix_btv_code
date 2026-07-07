@@ -2,6 +2,7 @@ import type { Dispatch } from 'react'
 import { Button } from '../../../primitives/Button'
 import { useAsyncAction } from '../../../../hooks/useAsyncAction'
 import { useToast } from '../../../primitives/Toast'
+import { ApiError } from '../../../../api/client'
 import { saveWorkflow } from '../../../../api/designer'
 import type { DesignerAction, DesignerState } from './reducer'
 
@@ -12,13 +13,10 @@ export function Toolbar({ state, dispatch }: { state: DesignerState; dispatch: D
   async function handleSave() {
     try {
       const result = await save.run({ nodes: state.nodes, edges: state.edges })
-      dispatch({ type: 'MARK_SAVED' })
-      toast.push(
-        'success',
-        `${result.workflowId} salvo → schema validado → ledger seq ${result.seq} → orquestrador aplica na próxima forge squad`,
-      )
-    } catch {
-      toast.push('error', 'falha ao salvar workflow')
+      dispatch({ type: 'MARK_SAVED', seq: result.seq })
+      toast.push('success', `${result.workflowId} salvo → schema validado → ledger seq ${result.seq}`)
+    } catch (e) {
+      toast.push('error', e instanceof ApiError ? e.message : 'falha ao salvar workflow')
     }
   }
 
@@ -45,7 +43,7 @@ export function Toolbar({ state, dispatch }: { state: DesignerState; dispatch: D
           onClick={() => void handleSave()}
           disabled={save.state.status === 'loading'}
         >
-          {save.state.status === 'loading' ? 'salvando…' : state.wfSaved ? '✓ salvo' : 'salvar & aplicar'}
+          {save.state.status === 'loading' ? 'salvando…' : state.wfSaved ? '✓ salvo' : 'salvar'}
         </Button>
       </div>
     </div>

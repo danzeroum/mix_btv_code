@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.buildtovalue.dev/schemas/squad-workflow.v1.schema.json",
+  "title": "squad-workflow.v1",
+  "description": "Grafo do Squad Designer (Fase 7 Onda 14). Salvar valida contra este schema e grava no ledger — aplicação real ao orquestrador (que continua com os 5 agentes fixos) é trabalho futuro, não fingida aqui.",
+  "type": "object",
+  "required": ["nodes", "edges"],
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "x", "y", "kind", "name", "role", "color", "icon", "sub", "params", "removable"],
+        "properties": {
+          "id": { "type": "string" },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "kind": { "type": "string", "enum": ["card", "pill"] },
+          "name": { "type": "string" },
+          "role": { "type": "string" },
+          "color": { "type": "string" },
+          "icon": { "type": "string" },
+          "sub": { "type": "string" },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["k", "v"],
+              "properties": {
+                "k": { "type": "string" },
+                "v": { "type": "string" }
+              }
+            }
+          },
+          "removable": { "type": "boolean" }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      }
+    }
+  }
+}

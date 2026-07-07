@@ -1,0 +1,50 @@
+{
+  "valid": {
+    "nodes": [
+      {
+        "id": "task",
+        "x": 20,
+        "y": 40,
+        "kind": "pill",
+        "name": "tarefa",
+        "role": "entrada",
+        "color": "var(--muted)",
+        "icon": "▸",
+        "sub": "",
+        "params": [],
+        "removable": false
+      },
+      {
+        "id": "architect",
+        "x": 200,
+        "y": 40,
+        "kind": "card",
+        "name": "architect",
+        "role": "arquitetura",
+        "color": "var(--rust)",
+        "icon": "◆",
+        "sub": "decide o desenho",
+        "params": [{ "k": "autonomia", "v": "nível 2" }],
+        "removable": true
+      }
+    ],
+    "edges": [{ "from": "task", "to": "architect", "label": "delega" }]
+  },
+  "invalid_missing_removable": {
+    "nodes": [
+      {
+        "id": "task",
+        "x": 20,
+        "y": 40,
+        "kind": "pill",
+        "name": "tarefa",
+        "role": "entrada",
+        "color": "var(--muted)",
+        "icon": "▸",
+        "sub": "",
+        "params": []
+      }
+    ],
+    "edges": []
+  }
+}
