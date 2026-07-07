@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bsquad.proto\x12\x0e\x66orge.squad.v1\"\x88\x01\n\tSquadTask\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x15\n\rdecision_type\x18\x03 \x01(\t\x12\x1a\n\x12max_autonomy_level\x18\x04 \x01(\r\x12\"\n\x1averification_evidence_json\x18\x05 \x01(\t\"\xab\x02\n\nSquadEvent\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\n\n\x02ts\x18\x02 \x01(\t\x12,\n\x08proposal\x18\x03 \x01(\x0b\x32\x18.forge.squad.v1.ProposalH\x00\x12.\n\tconsensus\x18\x04 \x01(\x0b\x32\x19.forge.squad.v1.ConsensusH\x00\x12*\n\x07handoff\x18\x05 \x01(\x0b\x32\x17.forge.squad.v1.HandoffH\x00\x12.\n\x04hitl\x18\x06 \x01(\x0b\x32\x1e.forge.squad.v1.HitlEscalationH\x00\x12*\n\x04step\x18\x07 \x01(\x0b\x32\x1a.forge.squad.v1.StepResultH\x00\x12\x0f\n\x05\x65rror\x18\x08 \x01(\tH\x00\x42\t\n\x07payload\"C\n\x08Proposal\x12\r\n\x05\x61gent\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x01\x12\x14\n\x0c\x63ontent_json\x18\x03 \x01(\t\"d\n\tConsensus\x12\x16\n\x0e\x64\x65\x63ision_maker\x18\x01 \x01(\t\x12\x10\n\x08strength\x18\x02 \x01(\x01\x12\x15\n\rdecision_json\x18\x03 \x01(\t\x12\x16\n\x0erequires_human\x18\x04 \x01(\x08\"\xd4\x01\n\x07Handoff\x12,\n\x05phase\x18\x01 \x01(\x0e\x32\x1d.forge.squad.v1.Handoff.Phase\x12\x12\n\nfrom_agent\x18\x02 \x01(\t\x12\x10\n\x08to_agent\x18\x03 \x01(\t\x12\x10\n\x08\x63ontract\x18\x04 \x01(\t\x12\x16\n\x0epayload_digest\x18\x05 \x01(\t\"K\n\x05Phase\x12\x15\n\x11PHASE_UNSPECIFIED\x10\x00\x12\t\n\x05START\x10\x01\x12\x07\n\x03\x41\x43K\x10\x02\x12\x0c\n\x08\x43OMPLETE\x10\x03\x12\t\n\x05\x45RROR\x10\x04\"4\n\x0eHitlEscalation\x12\x0e\n\x06reason\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x01\"?\n\nStepResult\x12\x0f\n\x07step_id\x18\x01 \x01(\t\x12\x0f\n\x07success\x18\x02 \x01(\x08\x12\x0f\n\x07summary\x18\x03 \x01(\t\"\x0f\n\rHealthRequest\"0\n\x0eHealthResponse\x12\r\n\x05ready\x18\x01 \x01(\x08\x12\x0f\n\x07version\x18\x02 \x01(\t2\x9f\x01\n\x0cSquadService\x12\x46\n\x0b\x45xecuteTask\x12\x19.forge.squad.v1.SquadTask\x1a\x1a.forge.squad.v1.SquadEvent0\x01\x12G\n\x06Health\x12\x1d.forge.squad.v1.HealthRequest\x1a\x1e.forge.squad.v1.HealthResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bsquad.proto\x12\x0e\x66orge.squad.v1\"\x88\x01\n\tSquadTask\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x15\n\rdecision_type\x18\x03 \x01(\t\x12\x1a\n\x12max_autonomy_level\x18\x04 \x01(\r\x12\"\n\x1averification_evidence_json\x18\x05 \x01(\t\"\xd8\x02\n\nSquadEvent\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\n\n\x02ts\x18\x02 \x01(\t\x12,\n\x08proposal\x18\x03 \x01(\x0b\x32\x18.forge.squad.v1.ProposalH\x00\x12.\n\tconsensus\x18\x04 \x01(\x0b\x32\x19.forge.squad.v1.ConsensusH\x00\x12*\n\x07handoff\x18\x05 \x01(\x0b\x32\x17.forge.squad.v1.HandoffH\x00\x12.\n\x04hitl\x18\x06 \x01(\x0b\x32\x1e.forge.squad.v1.HitlEscalationH\x00\x12*\n\x04step\x18\x07 \x01(\x0b\x32\x1a.forge.squad.v1.StepResultH\x00\x12\x0f\n\x05\x65rror\x18\x08 \x01(\tH\x00\x12+\n\x04\x63hat\x18\t \x01(\x0b\x32\x1b.forge.squad.v1.ChatMessageH\x00\x42\t\n\x07payload\"U\n\x0b\x43hatMessage\x12\x0e\n\x06\x61uthor\x18\x01 \x01(\t\x12\x13\n\x0b\x61uthor_role\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x13\n\x0bin_reply_to\x18\x04 \x01(\t\"C\n\x08Proposal\x12\r\n\x05\x61gent\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x01\x12\x14\n\x0c\x63ontent_json\x18\x03 \x01(\t\"d\n\tConsensus\x12\x16\n\x0e\x64\x65\x63ision_maker\x18\x01 \x01(\t\x12\x10\n\x08strength\x18\x02 \x01(\x01\x12\x15\n\rdecision_json\x18\x03 \x01(\t\x12\x16\n\x0erequires_human\x18\x04 \x01(\x08\"\xd4\x01\n\x07Handoff\x12,\n\x05phase\x18\x01 \x01(\x0e\x32\x1d.forge.squad.v1.Handoff.Phase\x12\x12\n\nfrom_agent\x18\x02 \x01(\t\x12\x10\n\x08to_agent\x18\x03 \x01(\t\x12\x10\n\x08\x63ontract\x18\x04 \x01(\t\x12\x16\n\x0epayload_digest\x18\x05 \x01(\t\"K\n\x05Phase\x12\x15\n\x11PHASE_UNSPECIFIED\x10\x00\x12\t\n\x05START\x10\x01\x12\x07\n\x03\x41\x43K\x10\x02\x12\x0c\n\x08\x43OMPLETE\x10\x03\x12\t\n\x05\x45RROR\x10\x04\"4\n\x0eHitlEscalation\x12\x0e\n\x06reason\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x01\"?\n\nStepResult\x12\x0f\n\x07step_id\x18\x01 \x01(\t\x12\x0f\n\x07success\x18\x02 \x01(\x08\x12\x0f\n\x07summary\x18\x03 \x01(\t\"\x0f\n\rHealthRequest\"0\n\x0eHealthResponse\x12\r\n\x05ready\x18\x01 \x01(\x08\x12\x0f\n\x07version\x18\x02 \x01(\t2\x9f\x01\n\x0cSquadService\x12\x46\n\x0b\x45xecuteTask\x12\x19.forge.squad.v1.SquadTask\x1a\x1a.forge.squad.v1.SquadEvent0\x01\x12G\n\x06Health\x12\x1d.forge.squad.v1.HealthRequest\x1a\x1e.forge.squad.v1.HealthResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,23 +34,25 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SQUADTASK']._serialized_start=32
   _globals['_SQUADTASK']._serialized_end=168
   _globals['_SQUADEVENT']._serialized_start=171
-  _globals['_SQUADEVENT']._serialized_end=470
-  _globals['_PROPOSAL']._serialized_start=472
-  _globals['_PROPOSAL']._serialized_end=539
-  _globals['_CONSENSUS']._serialized_start=541
-  _globals['_CONSENSUS']._serialized_end=641
-  _globals['_HANDOFF']._serialized_start=644
-  _globals['_HANDOFF']._serialized_end=856
-  _globals['_HANDOFF_PHASE']._serialized_start=781
-  _globals['_HANDOFF_PHASE']._serialized_end=856
-  _globals['_HITLESCALATION']._serialized_start=858
-  _globals['_HITLESCALATION']._serialized_end=910
-  _globals['_STEPRESULT']._serialized_start=912
-  _globals['_STEPRESULT']._serialized_end=975
-  _globals['_HEALTHREQUEST']._serialized_start=977
-  _globals['_HEALTHREQUEST']._serialized_end=992
-  _globals['_HEALTHRESPONSE']._serialized_start=994
-  _globals['_HEALTHRESPONSE']._serialized_end=1042
-  _globals['_SQUADSERVICE']._serialized_start=1045
-  _globals['_SQUADSERVICE']._serialized_end=1204
+  _globals['_SQUADEVENT']._serialized_end=515
+  _globals['_CHATMESSAGE']._serialized_start=517
+  _globals['_CHATMESSAGE']._serialized_end=602
+  _globals['_PROPOSAL']._serialized_start=604
+  _globals['_PROPOSAL']._serialized_end=671
+  _globals['_CONSENSUS']._serialized_start=673
+  _globals['_CONSENSUS']._serialized_end=773
+  _globals['_HANDOFF']._serialized_start=776
+  _globals['_HANDOFF']._serialized_end=988
+  _globals['_HANDOFF_PHASE']._serialized_start=913
+  _globals['_HANDOFF_PHASE']._serialized_end=988
+  _globals['_HITLESCALATION']._serialized_start=990
+  _globals['_HITLESCALATION']._serialized_end=1042
+  _globals['_STEPRESULT']._serialized_start=1044
+  _globals['_STEPRESULT']._serialized_end=1107
+  _globals['_HEALTHREQUEST']._serialized_start=1109
+  _globals['_HEALTHREQUEST']._serialized_end=1124
+  _globals['_HEALTHRESPONSE']._serialized_start=1126
+  _globals['_HEALTHRESPONSE']._serialized_end=1174
+  _globals['_SQUADSERVICE']._serialized_start=1177
+  _globals['_SQUADSERVICE']._serialized_end=1336
 # @@protoc_insertion_point(module_scope)

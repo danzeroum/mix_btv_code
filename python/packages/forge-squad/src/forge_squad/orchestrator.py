@@ -53,6 +53,30 @@ def _consensus_dict(consensus: Any) -> dict[str, Any]:
     return {**consensus.model_dump(), "requires_human": consensus.requires_human}
 
 
+# Nomes humanos dos papéis para a conversa (Fase 1). Papéis por domínio
+# (Pauteiro/Redator/...) chegam com a galeria de personas (`persona.v1`, Fase 2).
+_AGENT_DISPLAY = {
+    "architect": "Arquiteto",
+    "developer": "Desenvolvedor",
+    "auditor": "Auditor",
+    "designer": "Designer",
+    "ops": "Ops",
+}
+
+
+def _summarize_proposal_content(content: Any, confidence: float) -> str:
+    """Resumo humano da proposta para o chat — derivado do conteúdo REAL do
+    agente (nada fabricado); cai num texto genérico se o formato for
+    inesperado. `confidence` entra como sinal de convicção."""
+    pct = f"{round(confidence * 100)}%"
+    if isinstance(content, dict):
+        for key in ("recommendation", "final_output", "strategy", "pattern", "notes"):
+            value = content.get(key)
+            if isinstance(value, str) and value.strip():
+                return f"{value.strip()} (confiança {pct})"
+    return f"Analisei e registrei minha proposta (confiança {pct})."
+
+
 class UnifiedOrchestrator:
     """Ponte de alto nível entre todos os subsistemas do squad."""
 
@@ -118,6 +142,21 @@ class UnifiedOrchestrator:
                 "decision": consensus.decision.model_dump() if consensus.decision else None,
             }
         )
+
+        # Narra o consenso na conversa (Fase 1) — o squad "fala" com o membro humano.
+        _pct = round(consensus.consensus_strength * 100)
+        if consensus.requires_human:
+            await self._emit_chat(
+                "Squad",
+                "SYSTEM",
+                f"Consenso ficou fraco ({_pct}%). Preciso da sua orientação para seguir.",
+            )
+        else:
+            await self._emit_chat(
+                "Squad",
+                "SYSTEM",
+                f"Consenso alcançado ({_pct}%), liderado por {_AGENT_DISPLAY.get(consensus.decision_maker, consensus.decision_maker)}.",
+            )
 
         # ADR 0004: usa a property centralizada, não o número mágico 0.7.
         if consensus.requires_human:
@@ -227,6 +266,16 @@ class UnifiedOrchestrator:
         await self._emit(
             {"kind": "proposal", "agent": agent, "confidence": proposal.confidence, "content": proposal.content}
         )
+        # Dá VOZ ao agente na conversa (Fase 1: usuário como membro da squad).
+        # O texto é derivado do conteúdo real da proposta — nada fabricado.
+        await self._emit_chat(
+            _AGENT_DISPLAY.get(agent, agent.capitalize()),
+            "AGENT",
+            _summarize_proposal_content(proposal.content, proposal.confidence),
+        )
+
+    async def _emit_chat(self, author: str, author_role: str, text: str) -> None:
+        await self._emit({"kind": "chat", "author": author, "author_role": author_role, "text": text})
 
     async def _execute_plan_steps(self, plan: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []

@@ -6,9 +6,11 @@ import { useAsyncAction } from '../../../hooks/useAsyncAction'
 import { useToast } from '../../primitives/Toast'
 import {
   connectSquadEvents,
+  postSquadMessage,
   resolveHitl,
   runSquad,
   HANDOFF_PHASE_LABELS,
+  type SquadChatMessage,
   type SquadEventEnvelope,
   type SquadHandoff,
   type SquadStep,
@@ -29,6 +31,7 @@ export function Squad() {
   const [events, setEvents] = useState<SquadEventEnvelope[]>([])
   const [streamEnded, setStreamEnded] = useState(false)
   const [resolvedHitlCount, setResolvedHitlCount] = useState(0)
+  const [chatDraft, setChatDraft] = useState('')
   const disconnectRef = useRef<(() => void) | null>(null)
   const run = useAsyncAction(runSquad)
 
@@ -67,6 +70,15 @@ export function Squad() {
     [events],
   )
   const pendingHitl = resolvedHitlCount < hitlEvents.length ? hitlEvents[hitlEvents.length - 1] : null
+
+  const chat = useMemo(
+    () =>
+      events.flatMap((e, i) => (e.payload && 'Chat' in e.payload ? [{ c: e.payload.Chat, i }] : [])) as {
+        c: SquadChatMessage
+        i: number
+      }[],
+    [events],
+  )
 
   const errorMessage = useMemo(() => {
     for (let i = events.length - 1; i >= 0; i -= 1) {
@@ -112,6 +124,20 @@ export function Squad() {
       toast.push('success', allow ? 'aprovado' : 'rejeitado')
     } catch {
       toast.push('error', 'falha ao resolver gate HITL')
+    }
+  }
+
+  async function handleSendMessage() {
+    const text = chatDraft.trim()
+    if (!taskId || !text || !active) return
+    setChatDraft('')
+    try {
+      await postSquadMessage(taskId, text)
+      // A fala volta pelo próprio stream (o backend a ecoa como ChatMessage),
+      // então não a inserimos localmente — evita duplicar.
+    } catch {
+      setChatDraft(text)
+      toast.push('error', 'falha ao enviar mensagem')
     }
   }
 
@@ -260,6 +286,71 @@ export function Squad() {
           </Card>
         </div>
       </div>
+
+      <Card>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <strong>Conversa da squad</strong>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--faint)' }}>
+            você é um membro — não só o aprovador
+          </span>
+        </div>
+        <div
+          className="stack"
+          style={{ marginTop: 10, gap: 8, maxHeight: 300, overflow: 'auto' }}
+        >
+          {chat.length === 0 && (
+            <p className="mono" style={{ fontSize: 13, color: 'var(--faint)' }}>
+              {taskId ? 'a squad ainda não falou…' : 'rode uma tarefa para conversar com a squad.'}
+            </p>
+          )}
+          {chat.map(({ c, i }) => {
+            const human = c.author_role === 'HUMAN'
+            return (
+              <div
+                key={i}
+                style={{
+                  alignSelf: human ? 'flex-end' : 'flex-start',
+                  maxWidth: '80%',
+                  background: human ? 'var(--brand)' : 'var(--card)',
+                  color: human ? '#fff' : 'var(--ink)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 12,
+                  padding: '8px 12px',
+                }}
+              >
+                <div
+                  className="mono"
+                  style={{ fontSize: 10, opacity: 0.7, marginBottom: 2 }}
+                >
+                  {c.author}
+                  {c.author_role === 'SYSTEM' ? ' · squad' : ''}
+                </div>
+                <div style={{ fontSize: 13 }}>{c.text}</div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="row" style={{ marginTop: 10 }}>
+          <input
+            value={chatDraft}
+            onChange={(e) => setChatDraft(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void handleSendMessage()}
+            disabled={!active}
+            placeholder={active ? 'escreva para a squad…' : 'a squad precisa estar em execução'}
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              color: 'var(--ink)',
+              padding: '6px 10px',
+            }}
+          />
+          <Button onClick={() => void handleSendMessage()} disabled={!active || !chatDraft.trim()}>
+            enviar
+          </Button>
+        </div>
+      </Card>
     </div>
   )
 }

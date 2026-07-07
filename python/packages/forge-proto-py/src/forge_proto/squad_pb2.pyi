@@ -21,7 +21,7 @@ class SquadTask(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., description: _Optional[str] = ..., decision_type: _Optional[str] = ..., max_autonomy_level: _Optional[int] = ..., verification_evidence_json: _Optional[str] = ...) -> None: ...
 
 class SquadEvent(_message.Message):
-    __slots__ = ("task_id", "ts", "proposal", "consensus", "handoff", "hitl", "step", "error")
+    __slots__ = ("task_id", "ts", "proposal", "consensus", "handoff", "hitl", "step", "error", "chat")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TS_FIELD_NUMBER: _ClassVar[int]
     PROPOSAL_FIELD_NUMBER: _ClassVar[int]
@@ -30,6 +30,7 @@ class SquadEvent(_message.Message):
     HITL_FIELD_NUMBER: _ClassVar[int]
     STEP_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
+    CHAT_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     ts: str
     proposal: Proposal
@@ -38,7 +39,20 @@ class SquadEvent(_message.Message):
     hitl: HitlEscalation
     step: StepResult
     error: str
-    def __init__(self, task_id: _Optional[str] = ..., ts: _Optional[str] = ..., proposal: _Optional[_Union[Proposal, _Mapping]] = ..., consensus: _Optional[_Union[Consensus, _Mapping]] = ..., handoff: _Optional[_Union[Handoff, _Mapping]] = ..., hitl: _Optional[_Union[HitlEscalation, _Mapping]] = ..., step: _Optional[_Union[StepResult, _Mapping]] = ..., error: _Optional[str] = ...) -> None: ...
+    chat: ChatMessage
+    def __init__(self, task_id: _Optional[str] = ..., ts: _Optional[str] = ..., proposal: _Optional[_Union[Proposal, _Mapping]] = ..., consensus: _Optional[_Union[Consensus, _Mapping]] = ..., handoff: _Optional[_Union[Handoff, _Mapping]] = ..., hitl: _Optional[_Union[HitlEscalation, _Mapping]] = ..., step: _Optional[_Union[StepResult, _Mapping]] = ..., error: _Optional[str] = ..., chat: _Optional[_Union[ChatMessage, _Mapping]] = ...) -> None: ...
+
+class ChatMessage(_message.Message):
+    __slots__ = ("author", "author_role", "text", "in_reply_to")
+    AUTHOR_FIELD_NUMBER: _ClassVar[int]
+    AUTHOR_ROLE_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    IN_REPLY_TO_FIELD_NUMBER: _ClassVar[int]
+    author: str
+    author_role: str
+    text: str
+    in_reply_to: str
+    def __init__(self, author: _Optional[str] = ..., author_role: _Optional[str] = ..., text: _Optional[str] = ..., in_reply_to: _Optional[str] = ...) -> None: ...
 
 class Proposal(_message.Message):
     __slots__ = ("agent", "confidence", "content_json")
