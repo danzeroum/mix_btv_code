@@ -1,20 +1,19 @@
-import { simulateLatency } from './client'
-import type { ReviewerScore, VerifyStep } from '../types/domain'
+/**
+ * Fase 7 Onda 11: pipeline `/verify` real, rodando em background no `forge
+ * dashboard`. `POST /api/verify/run` dispara o job (mesma config que `forge
+ * verify`: `forge.toml` na raiz, ou `default_steps()` — espelha o job
+ * `rust` do CI) e devolve um `run_id`; `GET /api/verify/:id` (polling)
+ * acompanha o progresso real passo a passo até o veredito final. Execuções
+ * concorrentes são serializadas: um segundo `POST` com job ativo devolve
+ * `409` com o `run_id` já em andamento — o cliente trata 202 e 409 igual
+ * (os dois dão um `run_id` para acompanhar via polling).
+ */
+import { ApiError, fetchJson } from './client'
+import type { ReviewerScore } from '../types/domain'
 
-export const VERIFY_STEPS: VerifyStep[] = [
-  { name: 'cargo test --workspace', detail: '212 passed', ok: true, evidence: { passed: 212, failed: 0, duration_s: 8.4 } },
-  { name: 'cargo clippy -- -D warnings', detail: '0 warnings', ok: true, evidence: { warnings: 0, denied_lints: ['-D warnings'] } },
-  { name: 'cargo fmt --check', detail: 'formatado', ok: true, evidence: { files_checked: 42, diffs: 0 } },
-  { name: 'pytest (python/)', detail: '148 passed', ok: true, evidence: { passed: 148, failed: 0, packages: ['forge-promptforge', 'forge-squad'] } },
-  {
-    name: 'paridade de hash (Rust × Python)',
-    detail: 'fixtures batem',
-    ok: true,
-    evidence: { fixture: 'prompt-cache-key.v1', rust_hash: '9f3ac1e8', python_hash: '9f3ac1e8' },
-  },
-  { name: 'gitleaks (bloqueante)', detail: '0 segredos', ok: true, evidence: { secrets_found: 0, rules_version: '8.18.0' } },
-]
-
+/** "Review por valor" (`forge_review`'s gates/certification) ainda não
+ * ligado nesta onda — escopo desta fase é só o job de `/verify` em
+ * background (ver `docs/PLANO-FASE-7-frontend-primario.md`, Onda 11). */
 export const VALUE_SCORE = 0.86
 export const VALUE_GATE = 0.7
 
@@ -25,8 +24,54 @@ export const REVIEWERS: ReviewerScore[] = [
   { name: 'manutenção', score: 0.82, detail: 'poucas abstrações novas; segue os padrões existentes do crate.' },
 ]
 
-/** // TODO: backend Fase 5 — dispara `forge verify` real (hoje um stub no forge-cli), stream de progresso por passo. */
-export async function runVerify(): Promise<VerifyStep[]> {
-  await simulateLatency(800)
-  return VERIFY_STEPS
+export interface Finding {
+  tool: string
+  severity: string
+  message: string
+  file?: string
+  line?: number
+}
+
+export interface VerificationStep {
+  name: string
+  tool: string
+  exit_code: number
+  duration_ms: number
+  findings: Finding[]
+}
+
+export type Verdict = 'pass' | 'fail' | 'skipped'
+
+/** Espelha `forge_schemas::verification::VerificationEvidence`. */
+export interface VerificationEvidence {
+  run_id: string
+  git_sha: string
+  steps: VerificationStep[]
+  verdict: Verdict
+  produced_at: string
+}
+
+export interface VerifyRunStarted {
+  run_id: string
+}
+
+export type VerifyStatus =
+  | { status: 'running'; run_id: string; step: number; total: number }
+  | { status: 'done'; run_id: string; evidence: VerificationEvidence }
+
+export async function startVerifyRun(): Promise<VerifyRunStarted> {
+  let response: Response
+  try {
+    response = await fetch('/api/verify/run', { method: 'POST' })
+  } catch {
+    throw new ApiError('falha de rede em /api/verify/run', 'network_error')
+  }
+  if (response.status === 202 || response.status === 409) {
+    return (await response.json()) as VerifyRunStarted
+  }
+  throw new ApiError(`/api/verify/run respondeu ${response.status}`, `http_${response.status}`)
+}
+
+export async function fetchVerifyStatus(runId: string): Promise<VerifyStatus> {
+  return fetchJson<VerifyStatus>(`/api/verify/${encodeURIComponent(runId)}`)
 }

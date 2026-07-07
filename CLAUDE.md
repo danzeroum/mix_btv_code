@@ -41,7 +41,37 @@ just test | just lint | just verify    # atalhos (requer just)
 
 Plano completo em `docs/PLANO-PLATAFORMA-FORGE.md` (6 fases). Estado atual:
 **Fase 6 concluída — roadmap das 6 fases completo** (ver histórico completo
-em `docs/DECISOES.md`). O que vier depois é produto novo, não plano antigo.
+em `docs/DECISOES.md`). O que vier depois é produto novo, não plano antigo —
+e **a Fase 7, primeiro produto novo, está concluída** (plano completo em
+`docs/PLANO-FASE-7-frontend-primario.md`, ADRs 0015–0022).
+
+**Fase 7 — o navegador como forma primária de uso (ADRs 0015–0022), 15
+ondas:** o frontend (`web/`), antes 95% vitrine sobre 3 rotas GET, liga
+cada tela a backend real. Guarda de `Origin`/`Host` (ADR 0015) protege toda
+rota mutável; sessão de código roda pelo navegador via SSE (`forge-cli::
+web_agent`, ADR 0016/0020) com pedido de permissão real (timeout fail-closed,
+ADR 0017) e trilha de auditoria da matriz persistida (ADR 0018); o sidecar
+Python vira serviço de longa duração supervisionado (ADR 0019); squad ao
+vivo, prompts (CRUD+render) e ledger (leitura paginada) ganham tela real.
+**Grupo A do levantamento de design fechado 7/7**
+(`docs/LEVANTAMENTO-UI-DESIGNER.md`): Console MCP e Uso por modelo, Mapa de
+memória do squad via `MemoryService` novo Python↔Rust (ADR 0022, recall
+léxico TF-IDF — rotulado RAG, não semântico, por honestidade), Experimentos
+A/B (`experiment.v1` real via HTTP), Rate limits + Sandbox & skills de
+terceiro + Language servers (três telas admin pequenas, zero probe
+indevido). `/verify` roda em background com progresso real via polling;
+Providers reflete `Gateway::from_env` de verdade (fallback fixo
+anthropic→deepseek→openai); Modelo & Onboarding liga `model`/`agent` de
+verdade à sessão (autonomia por tarefa fica deliberadamente NÃO wireada —
+ADR 0021, `max_autonomy_level` é ignorado ponta-a-ponta pelo orquestrador)
+e o doctor agrega checagens reais (providers/uv/docker/git); o Designer
+salva um grafo validado (`squad.workflow.v1`) no ledger — "salvo e
+validado", nunca finge aplicar ao squad real. `forge dashboard` roda com
+o agente web HABILITADO por padrão (`--no-web-agent` para o modo
+só-leitura de antes). Descopes explícitos registrados (não só no código):
+`max_autonomy_level` e `forge_squad/forgetting.py` (código morto,
+confirmado por grep — o mapa de memória não mostra tendência de
+esquecimento fabricada).
 
 **Fase 6 — ecossistema e escala (ADRs 0011–0014), 9 ondas:** a plataforma
 passa a rodar **código que não é dela**, contido. Skills built-in viram

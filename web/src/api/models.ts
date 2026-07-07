@@ -1,5 +1,4 @@
-import { simulateLatency } from './client'
-import type { AgentProfile, AutonomyLevel, ModelTier, ModelTierId } from '../types/domain'
+import type { ModelTier, ModelTierId } from '../types/domain'
 
 export const MODEL_TIERS: ModelTier[] = [
   { id: 'small', models: 'haiku · deepseek-chat', label: 'step-discipline' },
@@ -13,26 +12,36 @@ export function primaryModelName(tier: ModelTierId): string {
   return found ? found.models.split(' · ')[0] : tier
 }
 
-export const AUTONOMY_LEVELS: { id: AutonomyLevel; label: string; enabled: boolean }[] = [
-  { id: 'interativo', label: 'Interativo', enabled: true },
-  { id: 'automatico', label: 'Automático (em dev)', enabled: false },
-  { id: 'somente_leitura', label: 'Somente leitura', enabled: true },
+/**
+ * Fase 7 Onda 13: `selectTier`/`selectAgentProfile`/`selectAutonomy` (mocks
+ * de `simulateLatency` que só devolviam o mesmo valor recebido) foram
+ * removidos — tier/agente não são mais "selecionados" via uma chamada à
+ * parte; a escolha feita em `Modelo.tsx` fica só no `AppContext` (parâmetro
+ * por sessão/tarefa, mirroring do CLI — sem store de preferência novo) e é
+ * aplicada de verdade quando a próxima mensagem é enviada
+ * (`SessionContext::sendMessage`'s `model`/`agent`, que já chegam a
+ * `SendMessageBody` real no Rust).
+ *
+ * `AUTONOMY_LEVELS` continua só informativo: `max_autonomy_level`
+ * (`SquadTask`) é ignorado ponta-a-ponta pelo orquestrador Python hoje
+ * (`ProgressiveAutonomyManager`/`agent_trust_scores` decide de verdade,
+ * `hitl.py`) — descope explícito registrado na ADR 0021, não wireable sem
+ * fabricar um efeito que não existe.
+ */
+export const AUTONOMY_LEVELS: { id: 'interativo' | 'automatico' | 'somente_leitura'; label: string; detail: string }[] = [
+  {
+    id: 'interativo',
+    label: 'Interativo',
+    detail: 'hoje: toda ferramenta "ask" pede confirmação — não há teto por tarefa.',
+  },
+  {
+    id: 'automatico',
+    label: 'Automático',
+    detail: 'não implementado — o orquestrador não aceita um teto de autonomia por tarefa ainda.',
+  },
+  {
+    id: 'somente_leitura',
+    label: 'Somente leitura',
+    detail: 'use o perfil de agente "plan" (acima) — edits já são negados por padrão nesse perfil.',
+  },
 ]
-
-/** // TODO: backend Fase 5 — persiste seleção de tier no forge-core, propaga ao gateway LLM. */
-export async function selectTier(tier: ModelTierId): Promise<ModelTierId> {
-  await simulateLatency(150)
-  return tier
-}
-
-/** // TODO: backend Fase 5 — muda o agente ativo (build/plan), recalcula matriz de permissões. */
-export async function selectAgentProfile(profile: AgentProfile): Promise<AgentProfile> {
-  await simulateLatency(150)
-  return profile
-}
-
-/** // TODO: backend Fase 6 — liga a nível de autonomia do hitl.py (ProgressiveAutonomyManager). */
-export async function selectAutonomy(level: AutonomyLevel): Promise<AutonomyLevel> {
-  await simulateLatency(150)
-  return level
-}

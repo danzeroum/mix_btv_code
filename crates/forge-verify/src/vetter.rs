@@ -295,6 +295,10 @@ pub struct SkillStatus {
     pub id: String,
     pub status: String,
     pub detail: String,
+    /// "builtin"/"third-party" como campo próprio (Fase 7 Onda 10, A6) — já
+    /// entrava só como sufixo de `detail`; a tela de sandbox precisa filtrar
+    /// por ele sem fazer parsing de string.
+    pub source: String,
 }
 
 /// Enumera os subdiretórios de `skills_dir`, veta cada um (`vet_skill`) e
@@ -332,6 +336,7 @@ pub fn list_skill_statuses(skills_dir: &Path, source: &str) -> Vec<SkillStatus> 
             id,
             status: decision_to_skill_status(result.decision).to_string(),
             detail,
+            source: source.to_string(),
         });
     }
     out

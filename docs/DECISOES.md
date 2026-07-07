@@ -822,3 +822,68 @@ opencode agora se verifica com a própria ferramenta, contém código de terceir
 num sandbox real, enxerga o código por LSP, recupera memória por similaridade,
 compara variantes com estatística honesta e valida a própria latência sob carga.
 O que vier depois é produto novo, não plano antigo.
+
+## Fase 7 — o navegador como forma primária de uso, 15 ondas (2026-07-06/07)
+
+Primeiro produto pós-roadmap: o frontend (`web/`), 95% vitrine sobre 3 rotas GET,
+liga cada tela a backend real. Emenda no meio do caminho reverteu um recorte
+inicial que deixava o Grupo A do levantamento de design (`docs/
+LEVANTAMENTO-UI-DESIGNER.md`) quase todo de fora — a versão final fecha 7/7.
+PRs estratégicas, uma por onda, CI verde antes do merge.
+
+- **Onda 1 — fundação web:** DTO de evento + SSE (`forge-cli::web_agent`), ponte
+  de permissão real, guarda de `Origin`/`Host` (ADR 0015/0016).
+- **Onda 2 — sessão e permissão:** timeout de permissão pendente fail-closed
+  (ADR 0017); matriz de permissão persistida + trilha de auditoria (ADR 0018).
+- **Onda 3 — sidecar Python como serviço de longa duração**, supervisionado,
+  substitui o spawn-por-chamada (ADR 0019).
+- **Onda 4 — squad ao vivo pelo navegador:** agentes mudando de estado em tempo
+  real, gate HITL bloqueando até a UI resolver.
+- **Onda 5 — biblioteca de prompts real** (CRUD + render), mesma rota que o chat
+  REPL já usa.
+- **Onda 6 — ledger real:** leitura paginada + filtro por ator.
+- **Onda 7 — Console MCP (A1) + Uso por modelo (A5):** telas dedicadas (não
+  cartão embutido), preview de política via `PermissionEngine::evaluate` real.
+- **Onda 8 — Mapa de memória do squad + busca RAG (A3):** `MemoryService` novo,
+  ponte Python↔Rust na direção certa (Rust chama, Python serve) — o
+  `CoreService.Recall/Remember` que o protótipo citava era stub abandonado e
+  direção errada. Recall léxico TF-IDF, rotulado honesto ("RAG" na nav, "léxico,
+  não semântico" no rodapé). `forgetting.py` confirmado código morto — sem
+  coluna de tendência de esquecimento fabricada. (ADR 0022.)
+- **Onda 9 — Experimentos A/B (A2):** `experiment.v1` (já existia, Fase 6) ganha
+  rota HTTP; banner explícito que a atribuição por telemetria ainda não roda em
+  produção (dados semeados).
+- **Onda 10 — Rate limits (A4) + Sandbox & skills de terceiro (A6) + Language
+  servers (A7):** três telas admin pequenas. Achado de corretude: o getter de uso
+  do `RateLimiter` não pode chamar `poll()` (muta, consumiria vaga real só de
+  abrir a tela). Zero probe indevido no LSP — a mesma prova que já existia
+  (registro sem subir processo) continua valendo.
+- **Onda 11 — `/verify` real em background**, progresso via polling, 409 em
+  execução concorrente.
+- **Onda 12 — Providers:** reflete `Gateway::from_env` de verdade (ordem fixa de
+  fallback anthropic→deepseek→openai); degrau de mutação descartado —
+  `FallbackChain` é código morto, `Gateway::generate` nunca o consulta.
+- **Onda 13 — Modelo & Onboarding:** `model`/`agent` (campos que existiam desde a
+  Onda 1, nunca populados pelo frontend) passam a chegar de verdade à sessão —
+  fronteira provada por comportamento observável (override de permissão muda o
+  resultado conforme o agente enviado). Doctor agrega checagens reais
+  (providers/uv/docker/git). Autonomia por tarefa (`max_autonomy_level`)
+  deliberadamente NÃO wireada — ignorada ponta-a-ponta pelo orquestrador hoje,
+  wire-la seria só "o campo viajou" sem efeito. (ADR 0021.)
+- **Onda 14 — Designer salva honesto:** `squad.workflow.v1` novo (schema +
+  fixture golden, padrão de `experiment.v1`) valida o grafo antes de gravar no
+  ledger; grafo malformado nunca toca o ledger. Corrigiu os 2 lados da mentira
+  do mock antigo (`seq` fabricado E a promessa de aplicação real).
+- **Onda 15 — fecho:** `--web-agent` vira padrão (`--no-web-agent` para o modo
+  só-leitura); varredura encontrou e removeu 2 resíduos mock que nenhuma onda
+  anterior tinha coberto (toggle de política de ferramenta fake na tela Sessão,
+  cabeçalho de sessão com provider/cache hardcoded) e um bug real só visível
+  escrevendo a 1ª cobertura de browser da tela Sessão (`fetchJson` chamando
+  `.json()` num corpo vazio de `202 Accepted`, fazendo toda mensagem enviada
+  parecer falha mesmo quando o servidor respondia com sucesso). Grupo A e Grupo
+  B do levantamento de design reconciliados como fechados.
+
+**Fase 7 concluída.** O produto que só existia como CLI/TUI agora tem o
+navegador como forma primária de uso, com prova executável (Playwright contra
+o `forge dashboard` real) em vez de leitura de código — inclusive achando e
+corrigindo um bug de produção que só a cobertura de browser revelava.

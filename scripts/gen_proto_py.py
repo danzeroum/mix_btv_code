@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROTO_DIR = ROOT / "schemas" / "proto"
 OUT_DIR = ROOT / "python" / "packages" / "forge-proto-py" / "src" / "forge_proto"
-PROTOS = ["llm.proto", "core.proto", "squad.proto", "promptforge.proto"]
+PROTOS = ["llm.proto", "core.proto", "squad.proto", "promptforge.proto", "memory.proto"]
 
 # grpc_tools gera import absoluto (`import x_pb2 as x__pb2`); como os stubs
 # vivem dentro do pacote forge_proto, precisa virar import relativo. Isso

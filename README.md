@@ -71,7 +71,7 @@ dashboard` sobe um painel local (axum) sobre `.forge/telemetry.db`.
 ```sh
 export ANTHROPIC_API_KEY=...
 cargo run -p forge-cli -- tui --model claude-sonnet-5   # sidecar sobe sozinho se `uv` estiver disponível
-cargo run -p forge-cli -- dashboard                     # painel de telemetria em http://127.0.0.1:7878
+cargo run -p forge-cli -- dashboard                     # sessão/permissão/squad ao vivo pelo navegador (Fase 7)
 ```
 
 **Fase 4 concluída** — squad multi-agente como motor, com o **gRPC
@@ -141,3 +141,23 @@ alvo de deploy real ainda).
 antigo — a plataforma se verifica com a própria ferramenta (o CI roda `forge
 verify` sobre si), contém código de terceiro, e escala. Uma pendência de
 *exercício* (não de código) da Fase 4 segue registrada abaixo.
+
+**Fase 7 concluída** — o navegador vira a forma primária de uso, em 15 ondas
+(ADRs 0015–0022). O frontend (`web/`) saiu de "95% vitrine sobre 3 rotas GET"
+para toda tela com backend real: sessão de código via SSE com permissão
+interativa de verdade (gate não contornável, timeout fail-closed), squad ao
+vivo com consenso e HITL observados em tempo real, biblioteca de prompts e
+ledger reais. As **7 telas do Grupo A** do levantamento de design
+(`docs/LEVANTAMENTO-UI-DESIGNER.md`) foram entregues — Console MCP, Uso por
+modelo, Mapa de memória do squad (busca léxica TF-IDF via um `MemoryService`
+novo, ponte Python↔Rust, ADR 0022), Experimentos A/B, Rate limits, Sandbox &
+skills de terceiro, Language servers — cada uma provada por Playwright contra
+o `forge dashboard` real, não por leitura de código. `/verify` roda em
+background com progresso via polling; o Designer salva um grafo validado
+(`squad.workflow.v1`) no ledger sem fingir aplicá-lo ao squad real —
+"salvo e validado" é a promessa, não "aplicado". `forge dashboard` roda com
+o agente web habilitado por padrão agora (`--no-web-agent` volta ao modo
+só-leitura). Autonomia por tarefa (`max_autonomy_level`) e a tendência de
+esquecimento do squad (`forgetting.py`) ficam explicitamente de fora — os
+dois são código morto/desconectado do caminho real, registrado em ADR
+(0021/0022) em vez de fingidos na UI.

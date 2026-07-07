@@ -1,16 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppDispatch, useAppState } from '../../../state/AppContext'
-import { useAsyncAction } from '../../../hooks/useAsyncAction'
+import { useSession } from '../../../state/SessionContext'
 import { useToast } from '../../primitives/Toast'
+import { useAsyncAction } from '../../../hooks/useAsyncAction'
+import { AsyncStatus } from '../../primitives/AsyncStatus'
 import { primaryModelName } from '../../../api/models'
-import {
-  INITIAL_TRANSCRIPT,
-  SESSION_HEADER,
-  TOOL_POLICIES,
-  streamAgent,
-  toggleToolPolicy,
-  type TranscriptTurn,
-} from '../../../api/session'
+import { fetchMatrix } from '../../../api/permissions'
+import { fetchProviders } from '../../../api/providers'
+import type { PermissionMatrixDecision } from '../../../types/domain'
+import type { TranscriptTurn } from '../../../api/session'
 
 const PREFIX_COLOR: Record<TranscriptTurn['kind'], string> = {
   user: 'var(--py)',
@@ -18,6 +16,14 @@ const PREFIX_COLOR: Record<TranscriptTurn['kind'], string> = {
   tool: 'var(--muted)',
   lint: 'var(--wire)',
   diff: 'var(--ink)',
+}
+
+/** Mesmas cores de `Skills.tsx`'s `DECISION_COLOR` — 3 entradas, não vale
+ * cross-importar de uma tela pra outra por isso. */
+const DECISION_COLOR: Record<PermissionMatrixDecision, string> = {
+  allow: 'var(--ok)',
+  ask: 'var(--amber)',
+  deny: 'var(--red)',
 }
 
 function TurnView({ turn }: { turn: TranscriptTurn }) {
@@ -62,47 +68,47 @@ export function Sessao() {
   const dispatch = useAppDispatch()
   const toast = useToast()
   const { modelTier, agentProfile } = useAppState()
-  const [transcript, setTranscript] = useState(INITIAL_TRANSCRIPT)
+  const { sessionId, transcript, streamingText, busy, ledgerVerified, lastError, sendMessage } = useSession()
   const [input, setInput] = useState('')
-  const [policies, setPolicies] = useState(TOOL_POLICIES)
-  const send = useAsyncAction(streamAgent)
+  const matrixState = useAsyncAction(fetchMatrix)
+  const providersState = useAsyncAction(fetchProviders)
+
+  useEffect(() => {
+    void matrixState.run()
+    void providersState.run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function handleSend() {
-    if (!input.trim()) return
+    if (!input.trim() || busy) return
     const text = input
     setInput('')
     try {
-      const newTurns = await send.run(text)
-      setTranscript((prev) => [...prev, ...newTurns])
+      await sendMessage(text, { model: primaryModelName(modelTier), agent: agentProfile })
     } catch {
-      toast.push('error', 'falha ao enviar mensagem (mock)')
+      toast.push('error', 'falha ao enviar mensagem')
     }
   }
 
-  async function handleTogglePolicy(tool: string) {
-    try {
-      const updated = await toggleToolPolicy(tool)
-      setPolicies((prev) => prev.map((p) => (p.tool === updated.tool ? updated : p)))
-    } catch {
-      toast.push('error', 'falha ao alternar política da ferramenta')
-    }
-  }
+  const activeProvider =
+    providersState.state.status === 'success'
+      ? (providersState.state.data.find((p) => p.configured)?.id ?? 'nenhum provider configurado')
+      : '…'
 
   return (
     <div style={{ display: 'flex', gap: 16, height: 'calc(100% - 50px)' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div className="mono" style={{ fontSize: 11.5, color: 'var(--faint)', marginBottom: 8 }}>
-          {primaryModelName(modelTier)} · agente {agentProfile} · {SESSION_HEADER.provider} · cache{' '}
-          {SESSION_HEADER.cacheOn ? 'on' : 'off'} · sessão {SESSION_HEADER.sessionId}
+          {primaryModelName(modelTier)} · agente {agentProfile} · {activeProvider} · sessão {sessionId.slice(0, 8)}
         </div>
 
         <div className="stack" style={{ flex: 1, overflow: 'auto', paddingRight: 8 }}>
           {transcript.map((t) => (
             <TurnView key={t.id} turn={t} />
           ))}
-          {send.state.status === 'loading' && (
+          {busy && (
             <div className="mono cursor-blink" style={{ color: 'var(--amber)', fontSize: 13 }}>
-              forge ▸ …
+              forge ▸ {streamingText || '…'}
             </div>
           )}
         </div>
@@ -111,7 +117,11 @@ export function Sessao() {
           className="mono"
           style={{ borderTop: '1px solid var(--line)', padding: '8px 0', fontSize: 11.5, color: 'var(--faint)' }}
         >
-          ⋯ concluído em 6 passos · 8 mensagens persistidas · ledger íntegro: 12 entradas ✓ · cache hit 41%
+          {lastError
+            ? `✗ erro: ${lastError}`
+            : ledgerVerified != null
+              ? `⋯ ledger íntegro: ${ledgerVerified} entrada(s) ✓`
+              : '⋯ nenhum turno concluído ainda nesta sessão'}
         </div>
 
         <div className="row" style={{ borderTop: '1px solid var(--line)', paddingTop: 8 }}>
@@ -142,31 +152,29 @@ export function Sessao() {
 
       <aside style={{ width: 210, flexShrink: 0 }} className="stack">
         <div>
-          <div style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 6 }}>FERRAMENTAS</div>
-          {policies.map((p) => (
-            <div key={p.tool} className="row" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
-              <button
-                onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'skills' })}
-                title="abrir política em Skills & Permissões"
-                style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--ink)', fontSize: 12 }}
-              >
-                {p.tool}
-              </button>
-              <button
-                onClick={() => void handleTogglePolicy(p.tool)}
-                title="alternar allow/ask"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  padding: 0,
-                  fontSize: 12,
-                  color: p.policy === 'allow' ? 'var(--ok)' : 'var(--amber)',
-                }}
-              >
-                {p.policy}
-              </button>
-            </div>
-          ))}
+          <div style={{ fontSize: 11, color: 'var(--faint)', marginBottom: 6 }}>
+            FERRAMENTAS <span style={{ color: 'var(--faint)', fontWeight: 400 }}>· perfil {agentProfile}</span>
+          </div>
+          <AsyncStatus state={matrixState.state} onRetry={() => void matrixState.run()}>
+            {(matrix) => (
+              <>
+                {matrix.map((row) => (
+                  <div key={row.tool} className="row" style={{ justifyContent: 'space-between', padding: '4px 0' }}>
+                    <button
+                      onClick={() => dispatch({ type: 'SET_SCREEN', screen: 'skills' })}
+                      title="ver/mudar política em Skills & Permissões"
+                      style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--ink)', fontSize: 12 }}
+                    >
+                      {row.tool}
+                    </button>
+                    <span style={{ fontSize: 12, color: DECISION_COLOR[row[agentProfile]] }}>
+                      {row[agentProfile]}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+          </AsyncStatus>
         </div>
 
         <div>

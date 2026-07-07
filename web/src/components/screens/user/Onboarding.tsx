@@ -1,8 +1,11 @@
+import { useEffect } from 'react'
 import { Card } from '../../primitives/Card'
 import { Button } from '../../primitives/Button'
+import { AsyncStatus } from '../../primitives/AsyncStatus'
 import { useAppDispatch } from '../../../state/AppContext'
 import { useToast } from '../../primitives/Toast'
-import { copyToClipboard, DOCTOR_OUTPUT, ENV_KEYS } from '../../../api/onboarding'
+import { useAsyncAction } from '../../../hooks/useAsyncAction'
+import { copyToClipboard, fetchDoctor } from '../../../api/onboarding'
 
 function CodeBlock({ code }: { code: string }) {
   const toast = useToast()
@@ -33,6 +36,12 @@ function CodeBlock({ code }: { code: string }) {
 
 export function Onboarding() {
   const dispatch = useAppDispatch()
+  const doctorState = useAsyncAction(fetchDoctor)
+
+  useEffect(() => {
+    void doctorState.run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="grid" style={{ gridTemplateColumns: '1fr 1.1fr' }}>
@@ -50,17 +59,22 @@ export function Onboarding() {
             ◑ Chaves de API <span style={{ fontSize: 11, color: 'var(--amber)' }}>etapa atual</span>
           </div>
           <div className="stack" style={{ marginTop: 8 }}>
-            {ENV_KEYS.map((k) => (
-              <div key={k.name} className="row mono" style={{ fontSize: 12, justifyContent: 'space-between' }}>
-                <span>{k.name}</span>
-                <span style={{ color: k.detected ? 'var(--ok)' : 'var(--muted)' }}>
-                  {k.detected ? `✓ definida (${k.masked})` : 'ausente · fallback'}
-                </span>
-              </div>
-            ))}
+            <AsyncStatus state={doctorState.state} onRetry={() => void doctorState.run()}>
+              {(checks) => {
+                const providers = checks.find((c) => c.id === 'providers')
+                return (
+                  <div className="row mono" style={{ fontSize: 12, justifyContent: 'space-between' }}>
+                    <span>providers</span>
+                    <span style={{ color: providers?.ok ? 'var(--ok)' : 'var(--muted)' }}>
+                      {providers?.detail ?? '—'}
+                    </span>
+                  </div>
+                )
+              }}
+            </AsyncStatus>
           </div>
           <p style={{ fontSize: 12, color: 'var(--faint)', marginTop: 8 }}>
-            🔑 keys vivem SÓ no processo Rust.
+            🔑 keys vivem SÓ no processo Rust — detalhe por provider na tela Providers.
           </p>
         </Card>
 
@@ -87,12 +101,18 @@ export function Onboarding() {
 
       <Card style={{ background: 'var(--term)' }}>
         <div className="mono" style={{ fontSize: 12.5, lineHeight: 1.9 }}>
-          <div style={{ color: 'var(--muted)' }}>$ forge init</div>
-          {DOCTOR_OUTPUT.map((line) => (
-            <div key={line} style={{ color: line.startsWith('✓') ? 'var(--ok)' : 'var(--faint)' }}>
-              {line}
-            </div>
-          ))}
+          <div style={{ color: 'var(--muted)' }}>$ forge doctor</div>
+          <AsyncStatus state={doctorState.state} onRetry={() => void doctorState.run()}>
+            {(checks) => (
+              <>
+                {checks.map((c) => (
+                  <div key={c.id} style={{ color: c.ok ? 'var(--ok)' : 'var(--faint)' }}>
+                    {c.ok ? '✓' : '○'} {c.detail}
+                  </div>
+                ))}
+              </>
+            )}
+          </AsyncStatus>
           <span className="cursor-blink">▸</span>
         </div>
       </Card>

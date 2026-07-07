@@ -22,6 +22,7 @@ use forge_schemas::experiment::ExperimentReport;
 use forge_schemas::handoff::HandoffEvent;
 use forge_schemas::ledger::LedgerEntry;
 use forge_schemas::telemetry::TelemetryEvent;
+use forge_schemas::workflow::SquadWorkflow;
 use jsonschema::validator_for;
 use serde_json::Value;
 
@@ -125,6 +126,32 @@ fn experiment_fixture_valida_e_desserializa() {
     assert!(
         !validator.is_valid(&doc["invalid_missing_verdict"]),
         "documento sem 'verdict' deveria reprovar o schema"
+    );
+}
+
+/// A checagem semântica (aresta referencia nó inexistente) não é
+/// expressável em JSON Schema puro — fica em `SquadWorkflow::validate_edges`
+/// (testada isoladamente em `workflow.rs`). Aqui só a FORMA: campo
+/// obrigatório ausente (`removable`) deve reprovar o schema.
+#[test]
+fn squad_workflow_fixture_valida_e_desserializa() {
+    let schema = schema("squad-workflow");
+    let doc = fixture("squad-workflow");
+    let validator = validator_for(&schema).expect("schema compila");
+
+    assert!(
+        validator.is_valid(&doc["valid"]),
+        "fixture válida não bateu o schema: {:?}",
+        validator.iter_errors(&doc["valid"]).collect::<Vec<_>>()
+    );
+    let parsed: SquadWorkflow =
+        serde_json::from_value(doc["valid"].clone()).expect("desserializa em SquadWorkflow");
+    assert_eq!(parsed.nodes.len(), 2);
+    assert!(parsed.validate_edges().is_ok());
+
+    assert!(
+        !validator.is_valid(&doc["invalid_missing_removable"]),
+        "documento sem 'removable' deveria reprovar o schema"
     );
 }
 

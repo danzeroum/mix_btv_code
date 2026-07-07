@@ -526,9 +526,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -768,6 +768,7 @@ name = "forge-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "crossterm",
  "forge-core",
@@ -782,13 +783,17 @@ dependencies = [
  "forge-verify",
  "jsonschema",
  "ratatui",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "time",
  "tokio",
+ "tokio-stream",
  "toml",
  "tonic",
+ "tower",
 ]
 
 [[package]]
@@ -828,6 +833,7 @@ version = "0.1.0"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
+ "serde",
  "tonic",
  "tonic-build",
 ]
@@ -852,11 +858,13 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "forge-llm",
+ "forge-schemas",
  "forge-store",
  "forge-verify",
  "serde",
  "serde_json",
  "tempfile",
+ "time",
  "tokio",
  "tower",
  "tower-http",
@@ -3142,6 +3150,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

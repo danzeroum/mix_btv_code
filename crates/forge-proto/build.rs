@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "core.proto",
         "squad.proto",
         "promptforge.proto",
+        "memory.proto",
     ];
 
     for proto in protos {
@@ -25,6 +26,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_client(true)
         .build_server(true)
+        // Fase 7 Onda 4: `SquadEvent` (e os tipos aninhados do `oneof payload`)
+        // vai direto pro SSE do agente web — "sem DTO espelho", serde direto
+        // no tipo gerado.
+        .type_attribute(".forge.squad.v1", "#[derive(serde::Serialize)]")
+        // Fase 7 Onda 5: mesma técnica para `GeneratorInfo`/`GeneratorField`,
+        // que viajam como JSON em `GET /api/prompt/generators`.
+        .type_attribute(".forge.promptforge.v1", "#[derive(serde::Serialize)]")
+        // Fase 7 Onda 8: `MemorySummary`/`MemoryMatch` vão direto pro
+        // `GET /api/memory`/`POST /api/memory/recall` — mesma técnica.
+        .type_attribute(".forge.memory.v1", "#[derive(serde::Serialize)]")
         .compile_protos(&protos.map(|p| format!("{proto_dir}/{p}")), &[proto_dir])?;
     Ok(())
 }

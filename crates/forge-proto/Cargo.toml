@@ -8,6 +8,9 @@ description = "Stubs gRPC gerados de schemas/proto (tonic) — ativado na Fase 3
 [dependencies]
 tonic.workspace = true
 prost.workspace = true
+# Serde direto nos tipos gerados (Fase 7 Ondas 4-5) — sem DTO espelho, tanto
+# para o squad (`SquadEvent`) quanto para o promptforge (`GeneratorInfo`).
+serde.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true

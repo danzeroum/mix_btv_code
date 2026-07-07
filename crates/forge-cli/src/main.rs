@@ -6,12 +6,22 @@
 //! `squad` ativa o sidecar Python na Fase 4; `verify` completa na Fase 5.
 
 mod cache;
+mod doctor_console;
+mod lsp_console;
+mod mcp_console;
+mod memory_console;
+mod prompt_render;
 mod rate_limit_gen;
+mod sandbox_console;
 mod session;
 mod sidecar;
 mod skills;
 mod squad;
+mod squad_agent;
+#[cfg(test)]
+mod test_support;
 mod tui_app;
+mod web_agent;
 
 use anyhow::{bail, Context, Result};
 use cache::CachedGenerator;
@@ -113,6 +123,13 @@ enum Commands {
         /// Porta local do dashboard.
         #[arg(long, default_value_t = 7878)]
         port: u16,
+        /// Fase 7 Onda 15 (fecho): as rotas do agente web (sessão/permissão
+        /// via SSE, squad ao vivo, designer) vêm HABILITADAS por padrão — o
+        /// navegador é a forma primária de uso desta fase, não mais opt-in
+        /// (Onda 1). `--no-web-agent` volta ao dashboard só-leitura de
+        /// antes, por trás da mesma guarda de Origin/Host.
+        #[arg(long, default_value_t = false)]
+        no_web_agent: bool,
     },
     /// Gera o relatório de A/B testing de um experimento a partir da telemetria
     /// local: compara a taxa de sucesso das duas variantes com teste de
@@ -163,7 +180,7 @@ async fn main() -> Result<()> {
             let (generator, root) = prepare(&opts)?;
             squad::run_squad(generator, &opts, &root, task).await
         }
-        Commands::Dashboard { port } => run_dashboard(port).await,
+        Commands::Dashboard { port, no_web_agent } => run_dashboard(port, !no_web_agent).await,
         Commands::Experiment {
             experiment,
             db,
@@ -234,7 +251,7 @@ fn print_experiment_human(report: &ExperimentReport) {
 
 /// Sobe o dashboard de telemetria lendo `.forge/telemetry.db` do diretório
 /// atual (criado, se ausente, por `run`/`chat`).
-async fn run_dashboard(port: u16) -> Result<()> {
+async fn run_dashboard(port: u16, web_agent: bool) -> Result<()> {
     let root = std::env::current_dir().context("diretório atual")?;
     let forge_dir = root.join(".forge");
     std::fs::create_dir_all(&forge_dir)?;
@@ -244,13 +261,70 @@ async fn run_dashboard(port: u16) -> Result<()> {
             .to_str()
             .unwrap_or(".forge/telemetry.db"),
     )?;
+    // Mesmo arquivo (`.forge/prompt_library.db`) que `/prompt save|library|...`
+    // do chat REPL já usa — não uma segunda biblioteca de prompts. Aberta uma
+    // vez aqui (não por requisição) e compartilhada via Arc<Mutex<_>>, mesmo
+    // motivo de `Telemetry` já ser um handle compartilhável (Fase 7 Onda 5).
+    let prompt_library =
+        std::sync::Arc::new(std::sync::Mutex::new(forge_store::PromptLibrary::open(
+            forge_dir
+                .join("prompt_library.db")
+                .to_str()
+                .unwrap_or(".forge/prompt_library.db"),
+        )?));
+    // Mesmo ledger (`.forge/forge.db`) que `session.rs`/`squad_agent.rs` já
+    // gravam — a tela só lê o que a CLI/squad já registraram, não uma
+    // segunda cadeia (Fase 7 Onda 6).
+    let ledger = std::sync::Arc::new(std::sync::Mutex::new(forge_store::LedgerStore::open(
+        forge_dir
+            .join("forge.db")
+            .to_str()
+            .unwrap_or(".forge/forge.db"),
+    )?));
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let web_dir = forge_server::default_web_dir();
-    eprintln!(
-        "forge dashboard — http://{addr} (assets: {})",
-        web_dir.display()
-    );
-    forge_server::serve(telemetry, &root, addr, web_dir).await?;
+    if web_agent {
+        eprintln!(
+            "forge dashboard — http://{addr} (assets: {}; sessão/permissão/squad ao vivo)",
+            web_dir.display()
+        );
+        let hub = web_agent::default_hub();
+        let squad_hub = squad_agent::default_hub();
+        let squad_pool = squad_agent::default_squad_pool(&root);
+        let squad_router = squad_agent::router(squad_hub, squad_pool);
+        let sidecar_service = prompt_render::default_sidecar_service(&root);
+        let prompt_router = prompt_render::router(sidecar_service);
+        let mcp_router = mcp_console::router(root.clone());
+        let memory_service = memory_console::default_memory_service(&root);
+        let memory_router = memory_console::router(memory_service);
+        let sandbox_router = sandbox_console::router();
+        let lsp_router = lsp_console::router(root.clone());
+        let doctor_router = doctor_console::router();
+        let extra_router = squad_router
+            .merge(prompt_router)
+            .merge(mcp_router)
+            .merge(memory_router)
+            .merge(sandbox_router)
+            .merge(lsp_router)
+            .merge(doctor_router);
+        web_agent::serve_with_agent(
+            telemetry,
+            prompt_library,
+            ledger,
+            &root,
+            addr,
+            web_dir,
+            hub,
+            extra_router,
+        )
+        .await?;
+    } else {
+        eprintln!(
+            "forge dashboard --no-web-agent (somente leitura) — http://{addr} (assets: {})",
+            web_dir.display()
+        );
+        forge_server::serve(telemetry, prompt_library, ledger, &root, addr, web_dir).await?;
+    }
     Ok(())
 }
 

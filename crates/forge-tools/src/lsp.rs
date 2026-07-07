@@ -33,7 +33,7 @@ const DIAG_BUDGET: Duration = Duration::from_secs(12);
 
 /// Um language server declarado pelo usuário: o comando que o sobe via stdio, e
 /// a raiz do workspace que ele deve analisar.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct LspServerConfig {
     pub id: String,
     pub command: String,

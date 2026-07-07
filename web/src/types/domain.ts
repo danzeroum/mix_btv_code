@@ -10,7 +10,19 @@ export type UserScreenId =
   | 'designer'
   | 'sugestoes'
 
-export type AdminScreenId = 'telemetria' | 'ledger' | 'verify' | 'providers' | 'skills'
+export type AdminScreenId =
+  | 'telemetria'
+  | 'mcp'
+  | 'modelos'
+  | 'memoria'
+  | 'experimentos'
+  | 'ratelimit'
+  | 'sandbox'
+  | 'lsp'
+  | 'ledger'
+  | 'verify'
+  | 'providers'
+  | 'skills'
 
 export type ScreenId = UserScreenId | AdminScreenId
 
@@ -31,64 +43,25 @@ export interface ModelTier {
   label: string
 }
 
-export type PermissionDecision = 'allow' | 'deny' | 'always'
-
-export interface PermissionRequest {
-  id: string
-  tool: string
-  scope: string
+/** Espelha `forge_schemas::ledger::OverrideMark` — override é sempre um
+ * campo de primeira classe na entrada em si, nunca inferido no cliente. */
+export interface LedgerOverrideMark {
+  marked: boolean
+  reason?: string
 }
 
-export interface SquadAgentId {
-  id: 'architect' | 'developer' | 'auditor' | 'designer' | 'ops'
-}
-
-export type SquadAgentState = 'concluido' | 'executando' | 'aguardando' | 'ocioso'
-
-export interface SquadAgent {
-  id: string
-  name: string
-  state: SquadAgentState
-  /** null quando o agente está ocioso e ainda não votou nesta rodada. */
-  confidence: number | null
-  task: string
-}
-
-export interface ConsensusResult {
-  strength: number
-  decisionMaker: string
-  dissent: { agent: string; score: number }[]
-}
-
-export interface PromptGenerator {
-  id: string
-  name: string
-}
-
-export interface SavedPrompt {
-  id: string
-  name: string
-  favorite: boolean
-  generator: string
-  tags: string[]
-}
-
+/** Espelha `forge_schemas::ledger::LedgerEntry` — a resposta de `GET
+ * /api/ledger` é essa struct serializada direto, sem DTO espelho. */
 export interface LedgerEntry {
   seq: number
-  ts: string
+  prev_hash: string
+  entry_hash: string
+  kind: string
   actor: string
-  actorColor: 'ok' | 'wire' | 'py'
-  action: string
-  hashPrev: string
-  hashCurr: string
-  flag?: 'override'
-}
-
-export interface VerifyStep {
-  name: string
-  detail: string
-  ok: boolean
-  evidence: Record<string, unknown>
+  payload: unknown
+  override?: LedgerOverrideMark
+  fake_marker?: string
+  ts: string
 }
 
 export interface ReviewerScore {
@@ -97,27 +70,21 @@ export interface ReviewerScore {
   detail: string
 }
 
+/** Espelha a resposta de `GET /api/providers` (Fase 7 Onda 12, piso) —
+ * `configured` é real (lido do mesmo env var que `Gateway::from_env` lê),
+ * não um status fabricado como "ativo"/"standby". */
 export interface ProviderInfo {
   id: string
-  name: string
-  status: 'ativo' | 'standby'
-}
-
-export interface RateLimitTier {
-  tier: ModelTierId
-  used: number
-  cap: number
+  configured: boolean
 }
 
 export interface SkillEntry {
   id: string
   status: 'aprovado' | 'bloqueado' | 'em_analise'
   detail: string
-}
-
-export interface McpServer {
-  id: string
-  status: 'ok' | 'pendente'
+  /** "builtin"/"third-party" (Fase 7 Onda 10) — a tela de sandbox filtra por
+   * ele em vez de fazer parsing de `detail`. */
+  source: string
 }
 
 export type PermissionMatrixDecision = 'allow' | 'ask' | 'deny'
@@ -126,6 +93,16 @@ export interface PermissionMatrixRow {
   tool: string
   build: PermissionMatrixDecision
   plan: PermissionMatrixDecision
+}
+
+/** Override persistido (Fase 7 Onda 2) — espelha `forge_store::RuleRecord`. */
+export interface PermissionRuleRecord {
+  id: number
+  profile: AgentProfile
+  tool: string
+  scope_prefix?: string
+  decision: PermissionMatrixDecision
+  created_at: string
 }
 
 // --- Squad Designer ---

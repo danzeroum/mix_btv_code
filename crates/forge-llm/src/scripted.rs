@@ -6,38 +6,61 @@
 //! Antes isto só existia como test double dentro de `#[cfg(test)]` (ver
 //! `forge-core/src/agent_loop.rs`); promovido a tipo público reusável para que
 //! um binário/endpoint fora de teste possa construí-lo. Determinístico e
-//! thread-safe (imutável; clona o turno por chamada), então serve a carga
-//! concorrente sem esgotar estado.
+//! thread-safe, então serve a carga concorrente sem esgotar estado.
+//!
+//! Fase 7 Onda 1: `from_sequence` acrescenta sequenciamento (turno N na
+//! N-ésima chamada) — o que faltava para roteirizar um cenário
+//! `tool_use → Ask → end_turn` sem inventar um novo test double. `echo`/
+//! `from_turn` continuam devolvendo sempre o mesmo turno (sequência de 1
+//! elemento, índice sempre grampeado em 0) — comportamento inalterado para
+//! quem já os usa (benches, `loadgen`, k6).
 
 use crate::chat::{AssistantTurn, ContentBlock, GenerateRequest, StopReason, Usage};
 use crate::gateway::{GatewayError, Generator};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
-/// Um gerador que sempre devolve o mesmo turno de texto — ideal para carga e
-/// bench: resposta determinística, sem rede, sem key, sem estado que esgote.
+/// Um gerador que devolve turnos pré-definidos em sequência — ideal para
+/// carga/bench com 1 turno só (resposta determinística, sem rede, sem key) e
+/// para roteirizar um cenário de vários passos em teste. Ao esgotar a
+/// sequência, repete o último turno para sempre (nunca entra em pânico sob
+/// chamadas além do roteiro).
 pub struct ScriptedGenerator {
-    turn: AssistantTurn,
+    turns: Mutex<Vec<AssistantTurn>>,
+    index: AtomicUsize,
 }
 
 impl ScriptedGenerator {
     /// Gerador que ecoa um texto fixo como turno do assistente.
     pub fn echo(text: impl Into<String>) -> Self {
-        Self {
-            turn: AssistantTurn {
-                content: vec![ContentBlock::Text { text: text.into() }],
-                stop_reason: StopReason::EndTurn,
-                usage: Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                },
-                provider: "scripted".into(),
+        Self::from_turn(AssistantTurn {
+            content: vec![ContentBlock::Text { text: text.into() }],
+            stop_reason: StopReason::EndTurn,
+            usage: Usage {
+                input_tokens: 0,
+                output_tokens: 0,
             },
-        }
+            provider: "scripted".into(),
+        })
     }
 
     /// Gerador que devolve um turno arbitrário (ex.: com tool_use), para cenários
     /// além do eco.
     pub fn from_turn(turn: AssistantTurn) -> Self {
-        Self { turn }
+        Self::from_sequence(vec![turn])
+    }
+
+    /// Gerador que devolve os turnos em sequência (turno N na N-ésima
+    /// chamada); ao esgotar, repete o último turno para sempre.
+    pub fn from_sequence(turns: Vec<AssistantTurn>) -> Self {
+        assert!(
+            !turns.is_empty(),
+            "ScriptedGenerator precisa de ao menos 1 turno"
+        );
+        Self {
+            turns: Mutex::new(turns),
+            index: AtomicUsize::new(0),
+        }
     }
 }
 
@@ -49,8 +72,17 @@ impl Generator for ScriptedGenerator {
     ) -> Result<AssistantTurn, GatewayError> {
         // Espelha o caminho real: emite o texto pelo callback de streaming e
         // devolve o turno agregado.
-        on_delta(&self.turn.text());
-        Ok(self.turn.clone())
+        let turns = self
+            .turns
+            .lock()
+            .expect("scripted generator mutex poisoned");
+        let i = self
+            .index
+            .fetch_add(1, Ordering::Relaxed)
+            .min(turns.len() - 1);
+        let turn = turns[i].clone();
+        on_delta(&turn.text());
+        Ok(turn)
     }
 }
 

@@ -89,6 +89,24 @@ pub enum SandboxError {
 }
 
 impl Sandbox {
+    /// Só verifica se o daemon Docker responde — sem criar/subir nenhum
+    /// contêiner (diferente de `run`/`run_with`, Fase 7 Onda 10, A4). Fail-
+    /// closed: qualquer erro (conexão ou ping) vira `false`, nunca panic.
+    /// Função associada (não `&self`): reachability do daemon não depende de
+    /// nenhum campo do perfil (image/mount/limites).
+    pub async fn ping() -> bool {
+        match bollard::Docker::connect_with_local_defaults() {
+            Ok(docker) => Self::ping_with(&docker).await,
+            Err(_) => false,
+        }
+    }
+
+    /// Como `ping`, mas contra um cliente já configurado — testável contra um
+    /// endpoint deterministicamente morto, mesmo padrão de `run_with`.
+    pub async fn ping_with(docker: &bollard::Docker) -> bool {
+        docker.ping().await.is_ok()
+    }
+
     /// Roda `cmd` (com `env`) no contêiner confinado. Async (bollard). Conecta
     /// ao daemon local; se ele não responder, devolve `DaemonUnavailable`.
     pub async fn run(
@@ -321,6 +339,21 @@ mod tests {
             matches!(err, SandboxError::DaemonUnavailable(_)),
             "esperava DaemonUnavailable, veio {err:?}"
         );
+    }
+
+    /// `ping_with` contra um endpoint deterministicamente morto — a mesma
+    /// prova de `daemon_inalcancavel_vira_erro_claro_nao_panic`, mas para o
+    /// caminho de leitura (Fase 7 Onda 10, A4): honesto `false`, nunca panic,
+    /// sem depender de Docker estar instalado neste ambiente.
+    #[tokio::test]
+    async fn ping_com_daemon_inalcancavel_e_false() {
+        let docker = bollard::Docker::connect_with_http(
+            "http://127.0.0.1:1",
+            5,
+            bollard::API_DEFAULT_VERSION,
+        )
+        .expect("connect_with_http só configura o cliente");
+        assert!(!Sandbox::ping_with(&docker).await);
     }
 
     /// Os testes de contenção são `#[ignore]`: no `cargo test` local aparecem

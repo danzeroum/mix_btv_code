@@ -44,6 +44,16 @@ impl PermissionEngine {
         Decision::Ask
     }
 
+    /// Combina `overrides` (checadas primeiro, na ordem dada) com as regras
+    /// desta engine — usado para que uma `Rule` persistida pelo usuário
+    /// (matriz build/plan×tool ou "sempre" da ponte de permissão, Fase 7
+    /// Onda 2) sempre vença o default do perfil, sem duplicar `evaluate`.
+    pub fn overlay(&self, overrides: &[Rule]) -> Self {
+        let mut rules = overrides.to_vec();
+        rules.extend(self.rules.iter().cloned());
+        Self { rules }
+    }
+
     /// Perfil somente leitura (safe mode / agente `plan`): edits e bash
     /// negados ou sob pergunta, leitura liberada.
     pub fn read_only() -> Self {
@@ -112,5 +122,55 @@ mod tests {
         assert_eq!(engine.evaluate("edit", "src/lib.rs"), Decision::Deny);
         assert_eq!(engine.evaluate("read", "src/lib.rs"), Decision::Allow);
         assert_eq!(engine.evaluate("bash", "cargo test"), Decision::Ask);
+    }
+
+    #[test]
+    fn overlay_override_vence_default_do_perfil() {
+        let base = PermissionEngine {
+            rules: vec![Rule {
+                tool: "bash".into(),
+                scope_prefix: None,
+                decision: Decision::Ask,
+            }],
+        };
+        let overridden = base.overlay(&[Rule {
+            tool: "bash".into(),
+            scope_prefix: None,
+            decision: Decision::Allow,
+        }]);
+        assert_eq!(overridden.evaluate("bash", "ls"), Decision::Allow);
+        // Sem override para "edit", o default do perfil ainda vale.
+        let base_edit = PermissionEngine {
+            rules: vec![Rule {
+                tool: "edit".into(),
+                scope_prefix: None,
+                decision: Decision::Deny,
+            }],
+        };
+        assert_eq!(base_edit.overlay(&[]).evaluate("edit", "x"), Decision::Deny);
+    }
+
+    #[test]
+    fn overlay_escopo_especifico_pode_conviver_com_default_generico() {
+        // Override específico ("sempre" para um comando exato) não deve
+        // vazar para outros escopos do mesmo tool — só o default genérico
+        // (scope_prefix: None) do perfil se aplica fora do prefixo coberto.
+        let base = PermissionEngine {
+            rules: vec![Rule {
+                tool: "bash".into(),
+                scope_prefix: None,
+                decision: Decision::Ask,
+            }],
+        };
+        let overridden = base.overlay(&[Rule {
+            tool: "bash".into(),
+            scope_prefix: Some("npm test".into()),
+            decision: Decision::Allow,
+        }]);
+        assert_eq!(
+            overridden.evaluate("bash", "npm test --watch"),
+            Decision::Allow
+        );
+        assert_eq!(overridden.evaluate("bash", "rm -rf /"), Decision::Ask);
     }
 }

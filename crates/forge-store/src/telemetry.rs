@@ -24,6 +24,19 @@ pub struct TelemetrySummary {
     pub cache_hit_rate: Option<f64>,
 }
 
+/// Contagens por modelo (Fase 7 Onda 7, A5) — `model` vem de `props.model`,
+/// gravado por `RateLimitedGenerator`/`CachedGenerator` em todo `llm.call`/
+/// `cache.hit`/`cache.miss` real. Tier é derivado por quem consome isto
+/// (`forge_llm::model_tier::tier_from_id`) — `forge-store` não depende de
+/// `forge-llm`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelUsage {
+    pub model: String,
+    pub calls: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+}
+
 pub struct TelemetryStore {
     conn: Connection,
 }
@@ -137,6 +150,31 @@ impl TelemetryStore {
         })?;
         rows.collect()
     }
+
+    /// Agrega `llm.call`/`cache.hit`/`cache.miss` por `props.model` (Fase 7
+    /// Onda 7, A5) — mesmo padrão de `experiment_variants`: um `CASE WHEN`
+    /// por coluna na mesma consulta, não três `SELECT`s separados.
+    pub fn model_usage(&self) -> rusqlite::Result<Vec<ModelUsage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT json_extract(props, '$.model') AS model,
+                    SUM(CASE WHEN name = 'llm.call' THEN 1 ELSE 0 END) AS calls,
+                    SUM(CASE WHEN name = 'cache.hit' THEN 1 ELSE 0 END) AS cache_hits,
+                    SUM(CASE WHEN name = 'cache.miss' THEN 1 ELSE 0 END) AS cache_misses
+             FROM telemetry_event
+             WHERE json_extract(props, '$.model') IS NOT NULL
+             GROUP BY model
+             ORDER BY model",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ModelUsage {
+                model: row.get(0)?,
+                calls: row.get(1)?,
+                cache_hits: row.get(2)?,
+                cache_misses: row.get(3)?,
+            })
+        })?;
+        rows.collect()
+    }
 }
 
 /// Handle cloneável e thread-safe sobre um [`TelemetryStore`] — decoradores
@@ -194,6 +232,16 @@ impl Telemetry {
             .lock()
             .expect("telemetry mutex poisoned")
             .experiment_variants(experiment)
+            .unwrap_or_default()
+    }
+
+    /// Contagens por modelo (Fase 7 Onda 7, A5). Vazio em falha, mesmo padrão
+    /// do resto do handle.
+    pub fn model_usage(&self) -> Vec<ModelUsage> {
+        self.0
+            .lock()
+            .expect("telemetry mutex poisoned")
+            .model_usage()
             .unwrap_or_default()
     }
 }
@@ -287,5 +335,58 @@ mod tests {
         telemetry.record("llm.call", "s1", json!({}), "t");
         clone.record("cache.hit", "s1", json!({}), "t");
         assert_eq!(telemetry.summary().total_events, 2);
+    }
+
+    /// Fase 7 Onda 7 (A5): `model_usage` agrega os 3 nomes reais que
+    /// `RateLimitedGenerator`/`CachedGenerator` gravam com `props.model`,
+    /// por modelo — inclui um evento sem `model` (ex.: `cache.hit` de outro
+    /// caminho) e um evento de nome irrelevante, nenhum dos dois deve poluir
+    /// a agregação.
+    #[test]
+    fn model_usage_agrega_llm_call_e_cache_hit_miss_por_modelo() {
+        let store = TelemetryStore::open_in_memory().unwrap();
+        for _ in 0..3 {
+            store
+                .record("llm.call", "s", &json!({"model": "claude-sonnet-5"}), "t")
+                .unwrap();
+        }
+        store
+            .record("cache.hit", "s", &json!({"model": "claude-sonnet-5"}), "t")
+            .unwrap();
+        store
+            .record("cache.miss", "s", &json!({"model": "claude-sonnet-5"}), "t")
+            .unwrap();
+        store
+            .record("llm.call", "s", &json!({"model": "claude-haiku-4-5"}), "t")
+            .unwrap();
+        // Ruído: sem `model` e um nome de evento não contado — não devem aparecer.
+        store.record("cache.hit", "s", &json!({}), "t").unwrap();
+        store
+            .record(
+                "session.start",
+                "s",
+                &json!({"model": "claude-sonnet-5"}),
+                "t",
+            )
+            .unwrap();
+
+        let usage = store.model_usage().unwrap();
+        assert_eq!(
+            usage,
+            vec![
+                ModelUsage {
+                    model: "claude-haiku-4-5".into(),
+                    calls: 1,
+                    cache_hits: 0,
+                    cache_misses: 0,
+                },
+                ModelUsage {
+                    model: "claude-sonnet-5".into(),
+                    calls: 3,
+                    cache_hits: 1,
+                    cache_misses: 1,
+                },
+            ]
+        );
     }
 }

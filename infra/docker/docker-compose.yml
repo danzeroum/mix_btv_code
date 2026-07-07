@@ -1,0 +1,59 @@
+# Compose de TESTE do Forge — NÃO é deploy de produção (ver infra/README.md).
+# Conveniência para subir um container onde você usa o `forge` como ferramenta.
+#
+#   export DEEPSEEK_API_KEY=sk-...      # ou ANTHROPIC_API_KEY / OPENAI_API_KEY
+#   docker compose -f infra/docker/docker-compose.yml run --rm forge
+#   # dentro do container: forge verify | forge run --model deepseek-chat "..." | ...
+#
+# Com DeepSeek, o --model deepseek-chat é OBRIGATÓRIO em run/chat/squad — o
+# gateway não troca o modelo por você (ver "Usando a API da DeepSeek" no README).
+services:
+  forge:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    image: forge:test
+    stdin_open: true # -i
+    tty: true # -t — necessário para forge chat/squad interativos
+    environment:
+      # A(s) key(s) vivem SÓ no processo Rust (ADR 0001). Passe pelo ambiente,
+      # nunca commitada. Cada uma herda do host se você a exportou antes; deixe
+      # vazia a(s) que não for usar — só ANTHROPIC_API_KEY tem prioridade na
+      # cadeia de fallback (Anthropic → DeepSeek → OpenAI, gateway.rs:44-45), então
+      # para testar só a DeepSeek não defina ANTHROPIC_API_KEY.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      # O projeto que o agente vai ler/editar, montado em /work.
+      - ../../:/work:rw
+      # --- SANDBOX (skills de terceiro, critério nº 1 da Fase 6) ---
+      # Descomente para dar ao forge acesso ao daemon Docker do host (DinD).
+      # Sem isto, skills de terceiro fail-CLOSE (por design, não é bug).
+      # Atenção à path-translation: os caminhos que o forge passa ao daemon são
+      # internos ao container; o daemon do host os interpreta como do host.
+      # - /var/run/docker.sock:/var/run/docker.sock
+
+  # --- DASHBOARD (telemetria via web) ---
+  # `forge dashboard` amarra em 127.0.0.1 por design (loopback), então um
+  # `ports: - "7878:7878"` normal NÃO funciona (o publish do Docker mapeia pro IP
+  # do container, não pro 127.0.0.1 interno). `network_mode: host` faz o
+  # container compartilhar o network namespace da VPS — aí o 127.0.0.1 do
+  # processo É o 127.0.0.1 da VPS, alcançável por túnel SSH.
+  #
+  #   docker compose -f infra/docker/docker-compose.yml run --rm dashboard
+  #   # na SUA máquina local (não na VPS):
+  #   ssh -L 7878:127.0.0.1:7878 usuario@ip-da-vps
+  #   # abra http://127.0.0.1:7878 no navegador local
+  #
+  # Nunca exponha a porta direto na internet (sem `ports:` nem firewall aberto)
+  # — o dashboard não foi projetado/testado para acesso público.
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    image: forge:test
+    network_mode: host
+    volumes:
+      - ../../:/work:rw
+    command: ["forge", "dashboard", "--port", "7878"]

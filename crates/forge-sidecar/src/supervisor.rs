@@ -21,24 +21,59 @@ impl SidecarSupervisor {
     /// no diretório do workspace Python. Não bloqueia — use
     /// [`Self::wait_ready`] para esperar o sidecar responder.
     pub fn spawn(python_workspace_dir: &Path, socket_path: PathBuf) -> Result<Self, SidecarError> {
+        // O diretório do socket é responsabilidade de quem sobe o processo
+        // (mesmo achado do `SquadSupervisor`, squad_client.rs) — sem isso, o
+        // bind gRPC do lado Python falha com "No such file or directory" se
+        // o caminho estiver num subdiretório ainda não criado (ex.: um
+        // `SidecarService` construído contra um workspace novo, achado real
+        // da Onda 5).
+        if let Some(parent) = socket_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let _ = std::fs::remove_file(&socket_path); // socket de uma execução anterior
-        let child = Command::new("uv")
-            .args([
-                "run",
-                "python",
-                "-m",
-                "forge_promptforge.server",
-                "--socket",
-            ])
-            .arg(&socket_path)
-            .current_dir(python_workspace_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
+        let mut cmd = Command::new("uv");
+        cmd.args([
+            "run",
+            "python",
+            "-m",
+            "forge_promptforge.server",
+            "--socket",
+        ])
+        .arg(&socket_path)
+        .current_dir(python_workspace_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+        // `uv run` spawna o Python como filho: matar só o processo `uv`
+        // deixaria o servidor Python órfão (mesmo achado do `SquadSupervisor`,
+        // squad_client.rs). Líder do próprio grupo → `kill()` sinaliza os dois.
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let child = cmd
             .spawn()
             .map_err(|e| SidecarError::Unavailable(format!("spawn do sidecar: {e}")))?;
         Ok(Self { child, socket_path })
+    }
+
+    /// PID do processo supervisionado — usado pelo serviço de longa duração
+    /// (Onda 3) para provar estabilidade entre chamadas (mesmo PID) e
+    /// detectar troca após um restart (PID novo).
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    /// Mata o processo supervisionado (SIGKILL no grupo inteiro em Unix —
+    /// ver comentário em `spawn`). Usado para reinício sob demanda e para
+    /// injeção de falha em teste (mesmo padrão de `SquadSupervisor::kill`).
+    pub async fn kill(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
+        self.child.kill().await
     }
 
     /// Faz poll do socket + health check até `timeout`. Devolve um cliente
@@ -52,8 +87,13 @@ impl SidecarSupervisor {
                 .try_wait()
                 .map_err(|e| SidecarError::Unavailable(e.to_string()))?
             {
+                let mut stderr = String::new();
+                if let Some(mut pipe) = self.child.stderr.take() {
+                    use tokio::io::AsyncReadExt;
+                    let _ = pipe.read_to_string(&mut stderr).await;
+                }
                 return Err(SidecarError::Unavailable(format!(
-                    "sidecar encerrou antes de ficar pronto (status: {status})"
+                    "sidecar encerrou antes de ficar pronto (status: {status}); stderr: {stderr}"
                 )));
             }
             if socket_ready(&self.socket_path) {
@@ -69,6 +109,28 @@ impl SidecarSupervisor {
                 )));
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+impl Drop for SidecarSupervisor {
+    /// Achado real (Onda 4, `squad_agent`'s e2e): `kill_on_drop(true)` do
+    /// tokio só sinaliza o processo IMEDIATO (`uv`) — como `uv run` reforka
+    /// o Python como filho, isso deixava o servidor Python **órfão rodando
+    /// para sempre** toda vez que um `SidecarSupervisor` era dropado sem
+    /// `.kill()` explícito antes (o caso comum: fim de teste, troca de
+    /// processo pelo `SidecarService` após detectar queda). `process_group(0)`
+    /// no `spawn` já deixava `uv` líder do próprio grupo — faltava usar
+    /// isso também no `Drop`, não só no `kill()` explícito. `Drop` não pode
+    /// ser `async`, então o sinal é enviado aqui de forma síncrona
+    /// (`libc::kill` não bloqueia) antes do reaper do tokio agir sobre o
+    /// processo imediato.
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
         }
     }
 }

@@ -27,10 +27,15 @@ serde_json.workspace = true
 toml.workspace = true
 tonic.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 time.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
+thiserror.workspace = true
+axum.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 jsonschema = "0.26"
+reqwest.workspace = true
+tower = { workspace = true, features = ["util"] }

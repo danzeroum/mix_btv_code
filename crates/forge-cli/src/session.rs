@@ -2,7 +2,7 @@
 //! (`.forge/forge.db` na raiz do workspace).
 
 use forge_core::LoopEvent;
-use forge_schemas::ledger::LedgerEntry;
+use forge_schemas::ledger::{LedgerEntry, OverrideMark};
 use forge_store::LedgerStore;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -98,6 +98,38 @@ impl Session {
     pub fn verify(&self) -> anyhow::Result<u64> {
         Ok(self.store.verify_chain()?)
     }
+}
+
+/// Registra uma entrada avulsa no MESMO ledger (`.forge/forge.db`), fora do
+/// ciclo de vida de uma `Session` de tarefa — usado por mutações de
+/// configuração (matriz de permissão, Fase 7 Onda 2) que não têm
+/// `session.start`/`session.end` próprios. Sempre marcada como `override`:
+/// afrouxar/restringir permissão pelo navegador é a mutação mais sensível
+/// deste plano e nunca deve passar em silêncio pelo ledger.
+pub fn append_override_entry(
+    root: &Path,
+    actor: &str,
+    kind: &str,
+    payload: Value,
+) -> anyhow::Result<()> {
+    let dir = root.join(".forge");
+    std::fs::create_dir_all(&dir)?;
+    let mut store = LedgerStore::open(dir.join("forge.db").to_str().unwrap_or(".forge/forge.db"))?;
+    store.append(LedgerEntry {
+        seq: 0,
+        prev_hash: String::new(),
+        entry_hash: String::new(),
+        kind: kind.into(),
+        actor: actor.into(),
+        payload,
+        r#override: Some(OverrideMark {
+            marked: true,
+            reason: None,
+        }),
+        fake_marker: None,
+        ts: now_rfc3339(),
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]

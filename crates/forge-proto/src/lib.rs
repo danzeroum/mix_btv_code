@@ -29,6 +29,11 @@ pub mod forge {
             tonic::include_proto!("forge.promptforge.v1");
         }
     }
+    pub mod memory {
+        pub mod v1 {
+            tonic::include_proto!("forge.memory.v1");
+        }
+    }
 }
 
 // Aliases curtos e estáveis para os consumidores. `promptforge` já era
@@ -45,4 +50,7 @@ pub mod core {
 }
 pub mod squad {
     pub use crate::forge::squad::v1::*;
+}
+pub mod memory {
+    pub use crate::forge::memory::v1::*;
 }

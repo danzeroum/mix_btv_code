@@ -330,6 +330,16 @@ antigo. A plataforma se verifica com a própria ferramenta, contém código de
 terceiro e escala. Resta a pendência de *exercício* abaixo — de exercício, não de
 código.
 
+**Produto novo pós-roadmap, já concluído: Fase 7 — o navegador como forma
+primária de uso** (`docs/PLANO-FASE-7-frontend-primario.md`, 15 ondas,
+ADRs 0015–0022). O frontend (`web/`), antes 95% vitrine sobre 3 rotas GET,
+liga cada uma das suas telas a backend real — sessão de código via SSE,
+squad ao vivo com gate HITL real, as 7 telas do Grupo A do levantamento de
+design (`docs/LEVANTAMENTO-UI-DESIGNER.md`), e o Designer salvando um
+grafo validado no ledger. `forge dashboard` roda com o agente web
+habilitado por padrão (`--no-web-agent` para o modo só-leitura de antes).
+Detalhe onda a onda em `pendencias.md`.
+
 **Pendência de exercício da Fase 4** (código pronto e testado por unit;
 falta só *exercitar* o caminho ponta-a-ponta): o registro do consenso no
 ledger (`squad.consensus` em `.forge/forge.db`, via

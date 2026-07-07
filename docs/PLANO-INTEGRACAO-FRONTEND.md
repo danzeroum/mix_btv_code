@@ -1,3 +1,14 @@
+> **SUPERSEDED por `docs/PLANO-FASE-7-frontend-primario.md`.** Este documento
+> nasceu numa branch paralela (`claude/frontend-backend-integration-7u5mti`, nunca
+> mergeada) cobrindo o mesmo território — o frontend é 95% vitrine, o servidor
+> expõe só 3 rotas GET — em 5 ondas mais largas. O plano de Fase 7 cobre o mesmo
+> escopo com granularidade de 12 ondas e fronteira de teste executável por onda, e
+> absorveu as ideias concretas daqui que ainda não estavam lá: a guarda de
+> `Origin`/`Host`, o wiring de MCP real + telemetria por modelo, o contrato de erro
+> `{error, code}` via `fetchJson()`, o truque `ScriptedGenerator`/modo roteirizado
+> para e2e sem API key, e o filtro `?actor=` do ledger. Mantido aqui só como
+> histórico de pesquisa — não desenvolver a partir deste documento.
+
 # Plano — frontend funcionando com o máximo do backend
 
 > Plano de integração `web/` ↔ backend (Rust `crates/` + sidecar Python),

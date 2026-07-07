@@ -1,0 +1,11 @@
+# Contexto de build do Docker (infra/docker/Dockerfile). Exclui o que não é
+# necessário para compilar o CLI — acelera muito o build e evita copiar GBs.
+target/
+**/node_modules/
+.git/
+web/dist/
+**/*.db
+.forge/
+.venv/
+**/.venv/
+**/__pycache__/

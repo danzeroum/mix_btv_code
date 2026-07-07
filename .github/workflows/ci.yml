@@ -153,3 +153,35 @@ jobs:
       - name: Encerra o endpoint de carga
         if: always()
         run: kill "$(cat loadgen.pid)" 2>/dev/null || true
+
+  # Frontend (Fase 7 Onda 1): o harness Playwright de integração real já
+  # existia (`web/tests/e2e-integration/`, sobe um `forge dashboard` real
+  # contra sqlite real) mas não era exercitado por nenhum job — regressão do
+  # front passava despercebida. `pnpm build` roda o typecheck (tsc -b) antes do
+  # bundle; `test:e2e:integration` builda + sobe o binário real via cargo, por
+  # isso o toolchain Rust entra aqui também.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # uv é necessário aqui pelo mesmo motivo do job `rust`: o e2e de
+      # integração do squad (squad-real-backend.spec.ts) sobe o
+      # `forge_squad.server` real via `uv run`. Sem resolver o venv antes,
+      # o primeiro `uv run` da suíte tenta baixar as dependências a frio e
+      # estoura o timeout dos testes Playwright (achado real — Onda 4).
+      - uses: astral-sh/setup-uv@v5
+      - run: cd ../python && uv sync
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g pnpm@10
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e:integration

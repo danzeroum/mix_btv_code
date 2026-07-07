@@ -1,15 +1,12 @@
-import { useState } from 'react'
 import { Card } from '../../primitives/Card'
 import { useToast } from '../../primitives/Toast'
 import { useAppDispatch, useAppState } from '../../../state/AppContext'
-import { AUTONOMY_LEVELS, MODEL_TIERS, selectAgentProfile, selectAutonomy, selectTier } from '../../../api/models'
-import type { AutonomyLevel } from '../../../types/domain'
+import { AUTONOMY_LEVELS, MODEL_TIERS } from '../../../api/models'
 
 export function Modelo() {
   const toast = useToast()
   const dispatch = useAppDispatch()
   const { modelTier: tier, agentProfile: agent } = useAppState()
-  const [autonomy, setAutonomy] = useState<AutonomyLevel>('interativo')
 
   return (
     <div className="grid grid-2">
@@ -20,7 +17,7 @@ export function Modelo() {
             <button
               onClick={() => {
                 dispatch({ type: 'SET_MODEL_TIER', tier: t.id })
-                void selectTier(t.id).then(() => toast.push('success', `tier ${t.id} selecionado`))
+                toast.push('success', `tier ${t.id} selecionado — aplica à próxima mensagem enviada`)
               }}
               style={{ background: 'transparent', border: 'none', textAlign: 'left', width: '100%', color: 'var(--ink)' }}
             >
@@ -43,7 +40,7 @@ export function Modelo() {
               <button
                 onClick={() => {
                   dispatch({ type: 'SET_AGENT_PROFILE', profile: p })
-                  void selectAgentProfile(p).then(() => toast.push('success', `agente ${p} ativo`))
+                  toast.push('success', `agente ${p} ativo — aplica à próxima mensagem enviada`)
                 }}
                 style={{ background: 'transparent', border: 'none', width: '100%', textAlign: 'left', color: 'var(--ink)' }}
               >
@@ -55,31 +52,31 @@ export function Modelo() {
         </div>
 
         <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 8 }}>NÍVEL DE AUTONOMIA</div>
+        {/* Fase 7 Onda 13: informativo, não um seletor — `max_autonomy_level`
+            (SquadTask) é ignorado ponta-a-ponta pelo orquestrador hoje (ADR
+            0021); wire-lo até aqui seria fabricar um efeito que não existe.
+            A autonomia real é decidida por agente via `agent_trust_scores`
+            (`ProgressiveAutonomyManager`, hitl.py), não por um teto de tarefa. */}
         <div className="stack">
           {AUTONOMY_LEVELS.map((lvl) => (
-            <button
+            <div
               key={lvl.id}
-              disabled={!lvl.enabled}
-              onClick={() => {
-                setAutonomy(lvl.id)
-                void selectAutonomy(lvl.id).then(() => toast.push('success', `autonomia: ${lvl.label}`))
-              }}
-              className="row"
+              className="stack"
               style={{
-                justifyContent: 'space-between',
-                background: 'transparent',
                 border: '1px solid var(--line)',
                 borderRadius: 7,
                 padding: '8px 10px',
-                color: lvl.enabled ? 'var(--ink)' : 'var(--faint)',
-                opacity: lvl.enabled ? 1 : 0.6,
+                color: 'var(--faint)',
               }}
             >
-              <span>{lvl.label}</span>
-              {lvl.id === autonomy && <span style={{ color: 'var(--rust)' }}>●</span>}
-            </button>
+              <span style={{ color: 'var(--muted)' }}>{lvl.label}</span>
+              <span style={{ fontSize: 11 }}>{lvl.detail}</span>
+            </div>
           ))}
         </div>
+        <p style={{ fontSize: 11, color: 'var(--faint)' }}>
+          não aplicado pelo orquestrador ainda — descope explícito (ADR 0021), não um controle de verdade.
+        </p>
 
         <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 8 }}>
           janela 200k · cache on · compaction ~75% tier-gated

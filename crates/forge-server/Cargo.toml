@@ -16,6 +16,15 @@ tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tower-http.workspace = true
+# `created_at` dos prompts salvos (Fase 7 Onda 5) — mesma lib/formato que
+# `forge-cli`'s `now_rfc3339()` já usa (`session.rs`), só que aqui embutida
+# porque forge-server não depende de forge-cli.
+time = { workspace = true }
+# `ExperimentReport`/`VariantStats` (Fase 7 Onda 9, A2) — o handler de
+# `/api/experiment/:nome` constrói os dois diretamente, não só nos testes
+# (por isso é dependência real, não de dev — diferente do uso de
+# `forge_schemas::ledger::LedgerEntry` nos testes, que só semeia fixtures).
+forge-schemas.workspace = true
 
 # Endpoint de carga (Fase 6 Onda 8b): o alvo HTTP do load-test do k6. Não é
 # produto — é o análogo do fixture MCP, mas para medir o P95 do gateway.

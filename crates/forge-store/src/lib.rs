@@ -8,10 +8,12 @@ pub mod events;
 pub mod ledger;
 pub mod prompt_cache;
 pub mod prompt_library;
+pub mod rule_store;
 pub mod telemetry;
 
 pub use events::{EventError, EventInput, EventStore, StoredEvent};
 pub use ledger::LedgerStore;
 pub use prompt_cache::PromptCache;
 pub use prompt_library::{PromptLibrary, SavedPrompt};
+pub use rule_store::{RuleDecision, RuleRecord, RuleStore, RuleStoreError};
 pub use telemetry::{Telemetry, TelemetryRecord, TelemetryStore, TelemetrySummary};

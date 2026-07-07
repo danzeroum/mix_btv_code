@@ -90,6 +90,18 @@ impl RateLimiter {
             }
         }
     }
+
+    /// Teto de chamadas por janela (Fase 7 Onda 10, A4) — leitura pura da
+    /// configuração, não do estado. Getter, não campo público: `timestamps`
+    /// continua encapsulado.
+    pub fn max_requests(&self) -> usize {
+        self.max_requests
+    }
+
+    /// Duração da janela (Fase 7 Onda 10, A4).
+    pub fn window(&self) -> Duration {
+        self.window
+    }
 }
 
 #[cfg(test)]
@@ -126,5 +138,12 @@ mod tests {
         let small = RateLimiter::for_tier(ModelTier::Small);
         let large = RateLimiter::for_tier(ModelTier::Large);
         assert!(small.max_requests > large.max_requests);
+    }
+
+    #[test]
+    fn getters_expoem_a_config_sem_expor_o_estado() {
+        let limiter = RateLimiter::new(42, Duration::from_secs(99), Duration::from_secs(99));
+        assert_eq!(limiter.max_requests(), 42);
+        assert_eq!(limiter.window(), Duration::from_secs(99));
     }
 }

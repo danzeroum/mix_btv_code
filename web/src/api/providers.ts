@@ -1,37 +1,22 @@
-import { simulateLatency } from './client'
-import type { ModelTierId, ProviderInfo, RateLimitTier } from '../types/domain'
+/**
+ * Fase 7 Onda 12 (piso): providers configurados de verdade (`GET
+ * /api/providers`, `forge-server` — reusa `Gateway::from_env().available()`,
+ * a MESMA leitura de env vars que uma sessão `forge run`/`chat` real usaria;
+ * zero dependência nova) + limites por tier reais (reusa `GET /api/ratelimit`
+ * da Onda 10/A4, `api/ratelimit.ts` — não reconstruído aqui).
+ *
+ * Degrau (reordenar fallback, ajustar teto do rate limiter) fica de fora
+ * desta onda: `forge_llm::FallbackChain` é código morto (`Gateway::generate`
+ * itera os providers configurados direto, nunca consulta
+ * `FallbackChain::next_after` — confirmado lendo o código antes de expor
+ * qualquer mutação) e, mesmo se fosse consultada, o `forge dashboard` é um
+ * processo separado de qualquer sessão real — uma mutação aqui não afetaria
+ * nenhuma sessão de verdade (mesmo achado da Onda 10 sobre "uso ao vivo" do
+ * `RateLimiter`). A tela é read-only.
+ */
+import { fetchJson } from './client'
+import type { ProviderInfo } from '../types/domain'
 
-export let PROVIDERS: ProviderInfo[] = [
-  { id: 'anthropic', name: 'Anthropic', status: 'ativo' },
-  { id: 'deepseek', name: 'DeepSeek', status: 'standby' },
-  { id: 'openai', name: 'OpenAI', status: 'standby' },
-]
-
-export const RATE_LIMITS: RateLimitTier[] = [
-  { tier: 'small', used: 12, cap: 120 },
-  { tier: 'medium', used: 34, cap: 60 },
-  { tier: 'large', used: 18, cap: 30 },
-]
-
-/** // TODO: backend Fase 5 — persiste ordem de fallback no forge-llm gateway. */
-export async function reorderFallback(order: string[]): Promise<ProviderInfo[]> {
-  await simulateLatency(200)
-  PROVIDERS = order.map((id) => PROVIDERS.find((p) => p.id === id)!).filter(Boolean)
-  return PROVIDERS
-}
-
-/** // TODO: backend Fase 5 — liga/desliga provider no forge-llm gateway real. */
-export async function toggleProvider(id: string): Promise<ProviderInfo[]> {
-  await simulateLatency(200)
-  PROVIDERS = PROVIDERS.map((p) => (p.id === id ? { ...p, status: p.status === 'ativo' ? 'standby' : 'ativo' } : p))
-  return PROVIDERS
-}
-
-/** // TODO: backend Fase 5 — ajusta o RateLimiter (sliding window) do forge-llm. */
-export async function setRateLimit(tier: ModelTierId, cap: number): Promise<RateLimitTier> {
-  await simulateLatency(150)
-  const found = RATE_LIMITS.find((r) => r.tier === tier)
-  if (!found) throw new Error('tier desconhecido')
-  found.cap = cap
-  return found
+export async function fetchProviders(): Promise<ProviderInfo[]> {
+  return fetchJson<ProviderInfo[]>('/api/providers')
 }

@@ -17,6 +17,12 @@
 - **`terraform/`** — esqueleto de provisionamento (sem alvo real; ver o cabeçalho
   do `main.tf`).
 - **`ansible/`** — esqueleto de configuração (idem).
+- **`docker/`** — imagem de **TESTE / homologação** (não é deploy de produção):
+  empacota o CLI `forge` + o sidecar Python para você rodar o Forge como
+  ferramenta dentro de um container, na sua VPS via SSH. Continua local-first (o
+  dashboard segue em `127.0.0.1`). Ver `docker/README.md` para as pegadinhas de
+  container (o `FORGE_PYTHON_DIR` obrigatório, o sandbox via socket do Docker, o
+  bind do dashboard). Não expõe serviço multiusuário na internet.
 
 ## Rodar o load-test localmente
 

@@ -794,6 +794,255 @@
               </div>
             </sc-if>
 
+            <!-- ░░░░░░░░░░ U8 · MAPA DE MEMÓRIA (RAG) ░░░░░░░░░░ -->
+            <sc-if value="{{ isMemoria }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; height:100%;">
+                <!-- agentes -->
+                <div style="flex:1; min-width:0; padding:20px 22px; overflow:auto; border-right:1px solid var(--line);">
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:14px;">Memória por agente · AgentMemorySystem</div>
+                  <div style="display:flex; flex-direction:column; gap:11px;">
+                    <sc-for list="{{ memAgents }}" as="m" hint-placeholder-count="4">
+                      <div style="border:1px solid var(--line); border-radius:11px; padding:14px 16px; background:var(--panel);">
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                          <span style="width:8px; height:8px; border-radius:50%; background:{{ m.color }};"></span>
+                          <span style="font-family:var(--disp); font-weight:600; font-size:15px; flex:1;">{{ m.agent }}</span>
+                          <span style="font-family:var(--mono); font-size:11px; color:{{ m.color }};">{{ m.count }} memórias</span>
+                        </div>
+                        <div style="font-size:12.5px; color:var(--ink); line-height:1.5;">↑ <span style="color:var(--muted);">{{ m.top }}</span></div>
+                        <div style="font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-top:7px;">esquecimento inteligente: {{ m.decay }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+                <!-- busca semantica -->
+                <div style="width:388px; flex:none; padding:20px 22px; display:flex; flex-direction:column;">
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:12px;">Recuperação semântica · RAG</div>
+                  <div style="display:flex; align-items:center; gap:8px; border:1px solid var(--line2); border-radius:9px; padding:9px 12px; background:var(--panel); margin-bottom:14px;">
+                    <span style="font-family:var(--mono); color:var(--rust); font-size:13px;">⌕</span>
+                    <input value="{{ memQuery }}" onInput="{{ memOnInput }}" onKeyDown="{{ memOnKey }}" placeholder="buscar memórias por termo…" style="all:unset; flex:1; min-width:0; font-family:var(--mono); font-size:12px; color:var(--ink);" />
+                    <button onClick="{{ memRun }}" style="all:unset; cursor:pointer; font-family:var(--mono); font-size:10px; color:var(--rust); border:1px solid var(--rust); border-radius:6px; padding:3px 9px;">↵ recall</button>
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:10px; overflow:auto; flex:1;">
+                    <sc-if value="{{ memShowIdle }}" hint-placeholder-val="{{ true }}">
+                      <div style="border:1px dashed var(--line2); border-radius:9px; padding:20px 16px; text-align:center; font-family:var(--mono); font-size:11.5px; color:var(--faint); line-height:1.7;">Digite uma consulta e pressione ↵.<br>Recuperação léxica TF-IDF sobre<br>o corpus de memórias do squad.</div>
+                    </sc-if>
+                    <sc-if value="{{ memLoading }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex; align-items:center; gap:10px; border:1px solid var(--line); border-radius:9px; padding:14px 16px; background:var(--panel); font-family:var(--mono); font-size:12px; color:var(--muted);">
+                        <span style="width:9px; height:9px; border-radius:50%; background:var(--rust); animation:fpulse 1s infinite;"></span>recall em andamento — CoreService.Recall…
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ memShowEmpty }}" hint-placeholder-val="{{ false }}">
+                      <div style="border:1px solid var(--line); border-radius:9px; padding:18px 16px; text-align:center; font-family:var(--mono); font-size:12px; color:var(--muted); line-height:1.6;">Nenhuma memória casou por termo.<br><span style="color:var(--faint); font-size:10.5px;">recall é léxico (ADR 0013) — tente sinônimos.</span></div>
+                    </sc-if>
+                    <sc-if value="{{ memShowResults }}" hint-placeholder-val="{{ false }}">
+                      <sc-for list="{{ memResults }}" as="h" hint-placeholder-count="2">
+                        <div style="border:1px solid var(--line); border-left:2px solid var(--rust); border-radius:9px; padding:12px 14px; background:var(--panel);">
+                          <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:6px;">
+                            <span style="font-family:var(--mono); font-size:11px; color:var(--rust); font-weight:600;">{{ h.score }}</span>
+                            <span style="font-family:var(--mono); font-size:10px; color:var(--faint);">{{ h.src }}</span>
+                          </div>
+                          <div style="font-size:12.5px; color:var(--ink); line-height:1.5; margin-bottom:5px;">{{ h.snip }}</div>
+                          <div style="font-family:var(--mono); font-size:10.5px; color:var(--muted);">↳ {{ h.q }}</div>
+                        </div>
+                      </sc-for>
+                    </sc-if>
+                  </div>
+                  <div style="margin-top:auto; padding-top:14px; font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.6;">Recall via CoreService.Recall · embeddings léxicos locais · Onda 6 no backend.</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- ░░░░░░░░░░ A6 · EXPERIMENTOS A/B ░░░░░░░░░░ -->
+            <sc-if value="{{ isExperimentos }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:22px 24px;">
+                <div style="display:flex; align-items:center; gap:12px; background:#f0a13c0d; border:1px solid var(--amber); border-radius:10px; padding:11px 16px; margin-bottom:18px;">
+                  <span style="font-family:var(--mono); font-size:13px; color:var(--amber);">⚠</span>
+                  <span style="font-size:12.5px; color:var(--ink); line-height:1.5;">Atribuição por telemetria <strong>ainda em instrumentação</strong> — os números abaixo são dados semeados. O veredito respeita significância; nada de "vencedor" forçado.</span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:14px;">
+                  <sc-for list="{{ experiments }}" as="x" hint-placeholder-count="3">
+                    <div style="border:1px solid var(--line); border-radius:12px; padding:16px 18px; background:var(--panel);">
+                      <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+                        <span style="font-family:var(--disp); font-weight:600; font-size:15px; flex:1;">{{ x.name }}</span>
+                        <span style="font-family:var(--mono); font-size:10px; color:{{ x.statusColor }}; border:1px solid {{ x.statusColor }}55; border-radius:5px; padding:2px 8px;">{{ x.status }}</span>
+                      </div>
+                      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+                        <div style="border:1px solid var(--line); border-radius:9px; padding:11px 13px; background:var(--panel2);">
+                          <div style="font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-bottom:7px;">{{ x.a.label }}</div>
+                          <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-family:var(--disp); font-weight:700; font-size:24px; color:var(--ink);">{{ x.a.rate }}%</span><span style="font-family:var(--mono); font-size:10px; color:var(--faint);">n={{ x.a.n }}</span></div>
+                        </div>
+                        <div style="border:1px solid var(--line); border-radius:9px; padding:11px 13px; background:var(--panel2);">
+                          <div style="font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-bottom:7px;">{{ x.b.label }}</div>
+                          <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-family:var(--disp); font-weight:700; font-size:24px; color:var(--ink);">{{ x.b.rate }}%</span><span style="font-family:var(--mono); font-size:10px; color:var(--faint);">n={{ x.b.n }}</span></div>
+                        </div>
+                      </div>
+                      <div style="display:flex; align-items:center; gap:10px; border-top:1px solid var(--line); padding-top:11px;">
+                        <span style="font-family:var(--mono); font-size:11px; color:var(--faint);">{{ x.p }}</span>
+                        <span style="font-size:12.5px; color:var(--muted); flex:1;">{{ x.verdict }}</span>
+                        <span style="font-family:var(--mono); font-size:11px; color:var(--ink);">→ {{ x.winner }}</span>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- ░░░░░░░░░░ A7 · CONSOLE MCP ░░░░░░░░░░ -->
+            <sc-if value="{{ isMcp }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:22px 24px; display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                <div>
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:12px;">Servidores conectados · rmcp</div>
+                  <div style="display:flex; flex-direction:column; gap:10px;">
+                    <sc-for list="{{ mcpServers }}" as="s" hint-placeholder-count="4">
+                      <div style="border:1px solid var(--line); border-radius:10px; padding:13px 15px; background:var(--panel); display:flex; align-items:center; gap:12px;">
+                        <span style="width:8px; height:8px; border-radius:50%; background:{{ s.statusColor }}; flex:none;"></span>
+                        <div style="flex:1; min-width:0;">
+                          <div style="font-family:var(--mono); font-size:13px; color:var(--ink);">{{ s.name }} <span style="color:var(--faint); font-size:10.5px;">· {{ s.transport }}</span></div>
+                          <div style="font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-top:3px;">{{ s.note }}</div>
+                        </div>
+                        <span style="font-family:var(--mono); font-size:10.5px; color:{{ s.statusColor }};">{{ s.status }}</span>
+                        <span style="font-family:var(--mono); font-size:11px; color:var(--faint); border-left:1px solid var(--line); padding-left:12px;">{{ s.tools }} tools</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="margin-top:14px; font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.6;">Cada chamada de tool passa pela política de permissões do core Rust — não contornável pelo servidor MCP.</div>
+                </div>
+                <div>
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:12px;">Ferramentas expostas · permissão por chamada</div>
+                  <div style="border:1px solid var(--line); border-radius:10px; overflow:hidden;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr 74px; gap:0; background:var(--panel2); font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint);">
+                      <span style="padding:9px 13px;">tool (namespaced)</span><span style="padding:9px 13px;">input_schema</span><span style="padding:9px 13px; text-align:center;">política</span>
+                    </div>
+                    <sc-for list="{{ mcpTools }}" as="t" hint-placeholder-count="6">
+                      <div style="display:grid; grid-template-columns:1fr 1fr 74px; gap:0; border-top:1px solid var(--line); align-items:center; font-family:var(--mono); font-size:12px;">
+                        <span style="padding:10px 13px; color:var(--ink);">{{ t.tool }}</span>
+                        <span style="padding:10px 13px; color:var(--muted);">{{ t.schema }}</span>
+                        <span style="padding:10px 13px; text-align:center;"><span style="font-size:10px; color:{{ t.pColor }}; border:1px solid {{ t.pColor }}55; border-radius:5px; padding:2px 7px;">{{ t.policy }}</span></span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- ░░░░░░░░░░ A5 · USO POR MODELO ░░░░░░░░░░ -->
+            <sc-if value="{{ isModelos }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:22px 24px;">
+                <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:14px;">Volume &amp; cache-hit por modelo · props.model</div>
+                <div style="border:1px solid var(--line); border-radius:12px; overflow:hidden;">
+                  <div style="display:grid; grid-template-columns:1.4fr 84px 1fr 96px; gap:0; background:var(--panel2); font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint);">
+                    <span style="padding:10px 15px;">modelo</span><span style="padding:10px 15px;">tier</span><span style="padding:10px 15px;">chamadas</span><span style="padding:10px 15px; text-align:right;">cache-hit</span>
+                  </div>
+                  <sc-for list="{{ modelUsage }}" as="m" hint-placeholder-count="4">
+                    <div style="display:grid; grid-template-columns:1.4fr 84px 1fr 96px; gap:0; border-top:1px solid var(--line); align-items:center;">
+                      <span style="padding:12px 15px; font-family:var(--mono); font-size:12.5px; color:var(--ink); display:flex; align-items:center; gap:8px;"><span style="width:7px;height:7px;border-radius:50%;background:{{ m.color }};"></span>{{ m.model }}</span>
+                      <span style="padding:12px 15px; font-family:var(--mono); font-size:11px; color:var(--muted);">{{ m.tier }}</span>
+                      <span style="padding:12px 15px;"><span style="display:flex; align-items:center; gap:10px;"><span style="flex:1; height:6px; background:var(--panel2); border-radius:3px; overflow:hidden;"><span style="display:block; height:100%; width:{{ m.barPct }}; background:{{ m.color }};"></span></span><span style="font-family:var(--mono); font-size:12px; color:var(--ink); width:30px;">{{ m.calls }}</span></span></span>
+                      <span style="padding:12px 15px; text-align:right; font-family:var(--mono); font-size:12px; color:var(--teal);">{{ m.hitLabel }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="margin-top:14px; font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.6;">Dado já capturado em cada evento; requer um summary que agrupe por modelo (hoje agrupa só por nome do evento).</div>
+              </div>
+            </sc-if>
+
+            <!-- ░░░░░░░░░░ A4 · RATE LIMITS ░░░░░░░░░░ -->
+            <sc-if value="{{ isRatelimit }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:22px 24px;">
+                <div style="display:flex; align-items:center; gap:12px; background:#f2683c0d; border:1px solid var(--rust); border-radius:10px; padding:11px 16px; margin-bottom:18px;">
+                  <span style="font-family:var(--mono); font-size:13px; color:var(--rust);">⚠</span>
+                  <span style="font-size:12.5px; color:var(--ink); line-height:1.5;">Uso ao vivo <strong>ainda não exposto</strong> — o <span style="font-family:var(--mono);">RateLimiter</span> não tem getter público (poll é privado). Os limites (teto) são reais; o consumo abaixo é ilustrativo até a engenharia expor a superfície.</span>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+                  <sc-for list="{{ rateTiers }}" as="t" hint-placeholder-count="3">
+                    <div style="border:1px solid var(--line); border-radius:12px; padding:16px 18px; background:var(--panel);">
+                      <div style="display:flex; align-items:baseline; justify-content:space-between;">
+                        <span style="font-family:var(--disp); font-weight:700; font-size:18px; color:{{ t.color }};">{{ t.tier }}</span>
+                        <span style="font-family:var(--mono); font-size:10.5px; color:var(--faint);">{{ t.pct }}</span>
+                      </div>
+                      <div style="font-family:var(--mono); font-size:10.5px; color:var(--muted); margin:4px 0 14px;">{{ t.models }}</div>
+                      <div style="height:8px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-bottom:8px;"><span style="display:block; height:100%; width:{{ t.pct }}; background:{{ t.color }};"></span></div>
+                      <div style="font-family:var(--mono); font-size:11px; color:var(--ink);">{{ t.used }} / {{ t.cap }} <span style="color:var(--faint);">por 600s</span></div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="margin-top:14px; font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.6;">Salvaguarda de custo, não defesa multiusuário. Hit de cache nunca consome vaga. Janela deslizante; ao encher, espera até liberar ou erra além de max_wait.</div>
+              </div>
+            </sc-if>
+
+            <!-- ░░░░░░░░░░ A7 · LANGUAGE SERVERS (LSP) ░░░░░░░░░░ -->
+            <sc-if value="{{ isLsp }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:22px 24px; display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                <div>
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:12px;">Servidores · .forge/lsp.toml</div>
+                  <div style="display:flex; flex-direction:column; gap:10px;">
+                    <sc-for list="{{ lspServers }}" as="s" hint-placeholder-count="3">
+                      <div style="border:1px solid var(--line); border-radius:10px; padding:13px 15px; background:var(--panel);">
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                          <span style="width:8px; height:8px; border-radius:50%; background:{{ s.statusColor }};"></span>
+                          <span style="font-family:var(--mono); font-size:13px; color:var(--ink); flex:1;">{{ s.id }} <span style="color:var(--faint); font-size:10.5px;">· {{ s.lang }} · {{ s.root }}</span></span>
+                          <span style="font-family:var(--mono); font-size:10.5px; color:{{ s.statusColor }};">{{ s.status }}</span>
+                        </div>
+                        <div style="display:flex; align-items:baseline; gap:10px; font-family:var(--mono); font-size:10.5px; color:var(--muted);">
+                          <span>diagnósticos: <span style="color:var(--ink);">{{ s.diags }}</span></span>
+                          <span style="color:var(--faint);">· {{ s.note }}</span>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="margin-top:12px; font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.6;">Sessão preguiçosa e reusada (≠ MCP): sobe no 1º uso, reaproveita o processo indexado; morto no drop — nada de órfão.</div>
+                </div>
+                <div>
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:12px;">Consultas expostas como tools</div>
+                  <div style="display:flex; flex-direction:column; gap:10px;">
+                    <sc-for list="{{ lspQueries }}" as="q" hint-placeholder-count="3">
+                      <div style="border:1px solid var(--line); border-left:2px solid var(--teal); border-radius:9px; padding:12px 14px; background:var(--panel);">
+                        <div style="font-family:var(--mono); font-size:12px; color:var(--teal); margin-bottom:5px;">{{ q.tool }}</div>
+                        <div style="font-family:var(--mono); font-size:10.5px; color:var(--muted);">{{ q.args }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="margin-top:12px; font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.6;">Cada consulta passa pelo mesmo motor de permissões (scope <span style="color:var(--ink);">lsp:&lt;id&gt;/&lt;query&gt; &lt;file&gt;</span>). Posições 0-indexed, convenção LSP.</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <!-- ░░░░░░░░░░ A6 · SANDBOX & SKILLS DE TERCEIRO ░░░░░░░░░░ -->
+            <sc-if value="{{ isSandbox }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:22px 24px; display:grid; grid-template-columns:1fr 1.15fr; gap:20px;">
+                <div>
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:12px;">Perfil de confinamento · Docker (bollard)</div>
+                  <div style="border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--panel);">
+                    <sc-for list="{{ sandboxProfile }}" as="p" hint-placeholder-count="7">
+                      <div style="display:flex; gap:12px; padding:10px 15px; border-top:1px solid var(--line); font-family:var(--mono); font-size:12px;">
+                        <span style="color:var(--faint); width:96px; flex:none;">{{ p.k }}</span>
+                        <span style="color:var(--ink);">{{ p.v }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="margin-top:12px; display:flex; align-items:center; gap:9px; border:1px solid var(--ok); background:#43c4630d; border-radius:9px; padding:11px 14px;">
+                    <span style="width:8px; height:8px; border-radius:50%; background:var(--ok);"></span>
+                    <span style="font-size:12px; color:var(--ink); line-height:1.5;"><strong>Fail-closed:</strong> sem daemon Docker, a execução devolve erro claro — nunca um "rodou" silencioso.</span>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:12px;">Skills de terceiro · instalar → vetar → habilitar</div>
+                  <div style="display:flex; flex-direction:column; gap:10px;">
+                    <sc-for list="{{ thirdSkills }}" as="s" hint-placeholder-count="4">
+                      <div style="border:1px solid var(--line); border-radius:10px; padding:13px 15px; background:var(--panel); display:flex; align-items:center; gap:12px;">
+                        <div style="flex:1; min-width:0;">
+                          <div style="font-family:var(--mono); font-size:13px; color:var(--ink);">{{ s.name }} <span style="color:var(--faint); font-size:10.5px;">{{ s.ver }}</span></div>
+                          <div style="font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-top:3px;">{{ s.note }}</div>
+                        </div>
+                        <span style="font-family:var(--mono); font-size:10px; color:{{ s.stageColor }}; border:1px solid {{ s.stageColor }}55; border-radius:5px; padding:3px 9px;">{{ s.stage }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="margin-top:12px; font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.6;">Confiança = manifesto vetado (skill-vetter bloqueante, ADR 0009/0011). Skill de terceiro roda dentro do sandbox; built-in confiável segue o caminho não-containerizado.</div>
+                </div>
+              </div>
+            </sc-if>
+
           </div>
         </div>
       </div>
@@ -805,7 +1054,29 @@
 class Component extends DCLogic {
   state = { persona: 'user', screen: 'sessao', selectedNode: 'developer', wfSaved: false,
     mode: 'select', dragId: null, grabDX: 0, grabDY: 0, pendingConnect: null, addCount: 0,
-    nodes: null, edges: null, theme: 'default', accent: null };
+    nodes: null, edges: null, theme: 'default', accent: null,
+    memQuery: '', memStatus: 'idle', memResults: null };
+
+  // ── busca RAG (recall léxico TF-IDF, ADR 0013) ──
+  onMemInput(e) { this.setState({ memQuery: e.target.value }); }
+  onMemKey(e) { if (e.key === 'Enter') this.runRecall(); }
+  runRecall() {
+    const q = (this.state.memQuery || '').trim();
+    if (!q) { this.setState({ memStatus: 'idle', memResults: null }); return; }
+    if (this._memTimer) clearTimeout(this._memTimer);
+    this.setState({ memStatus: 'loading', memResults: null });
+    // simula recall via CoreService.Recall (backend real: memory.py recall)
+    this._memTimer = setTimeout(() => {
+      const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const scored = this.memHits.map(h => {
+        const hay = (h.q + ' ' + h.snip + ' ' + h.src).toLowerCase();
+        let hits = 0; terms.forEach(t => { if (hay.includes(t)) hits++; });
+        const score = terms.length ? +(0.55 + 0.4 * (hits / terms.length)).toFixed(2) : h.score;
+        return { ...h, score, hits };
+      }).filter(h => h.hits > 0).sort((a, b) => b.score - a.score);
+      this.setState({ memStatus: 'done', memResults: scored });
+    }, 620);
+  }
 
   THEMES = {
     default:    { bg:'#07090d', bg2:'#0b0e13', surf:'#0f1115', term:'#07090d', panel:'#12151c', panel2:'#171b24', line:'#242b37', line2:'#2e3644', ink:'#e8ecf3', muted:'#8b95a7', faint:'#5b6474', rust:'#f2683c', amber:'#f0a13c', teal:'#2fb8a0', py:'#4d9fff', wire:'#a78bfa', ok:'#43c463', red:'#f2544f' },
@@ -892,10 +1163,17 @@ class Component extends DCLogic {
     { id: 'prompts', icon: '❯', label: 'Biblioteca de prompts', hint: '/prompt · PromptForge', accent: 'var(--teal)' },
     { id: 'squad', icon: '⧉', label: 'Squad ao vivo', hint: 'forge squad', accent: 'var(--py)' },
     { id: 'designer', icon: '⬒', label: 'Squad Designer', hint: 'workflow visual · conceito', accent: 'var(--py)' },
+    { id: 'memoria', icon: '❋', label: 'Mapa de memória', hint: 'AgentMemory · RAG', accent: 'var(--rust)' },
     { id: 'sugestoes', icon: '✧', label: 'Sugestões de interação', hint: 'propostas de tela', accent: 'var(--wire)' },
   ];
   adminNav = [
     { id: 'telemetria', icon: '▦', label: 'Telemetria', hint: 'forge dashboard', accent: 'var(--py)' },
+    { id: 'modelos', icon: '◷', label: 'Uso por modelo', hint: 'volume · cache-hit', accent: 'var(--py)' },
+    { id: 'experimentos', icon: '⚖', label: 'Experimentos A/B', hint: 'variantes · veredito', accent: 'var(--ok)' },
+    { id: 'ratelimit', icon: '⣿', label: 'Rate limits', hint: 'quota por tier', accent: 'var(--rust)' },
+    { id: 'mcp', icon: '◈', label: 'Console MCP', hint: 'servidores · tools', accent: 'var(--teal)' },
+    { id: 'lsp', icon: '⌘', label: 'Language servers', hint: 'LSP · diagnósticos', accent: 'var(--teal)' },
+    { id: 'sandbox', icon: '⬢', label: 'Sandbox & skills', hint: 'confinamento · vetter', accent: 'var(--amber)' },
     { id: 'ledger', icon: '⛓', label: 'Ledger / Auditoria', hint: 'hash-chain', accent: 'var(--ok)' },
     { id: 'verify', icon: '✓', label: 'Verificação & Review', hint: '/verify · value_score', accent: 'var(--teal)' },
     { id: 'providers', icon: '⇄', label: 'Providers & Limites', hint: 'gateway · rate limit', accent: 'var(--rust)' },
@@ -916,7 +1194,84 @@ class Component extends DCLogic {
     verify: { kicker: 'Admin · qualidade', title: 'Verificação & review por valor', accent: 'var(--teal)', note: 'Evidência determinística + revisão por 4 critérios. PR sem evidência é bloqueado.', chrome: '127.0.0.1:7878/verify', chromeIcon: '✓', chromeRight: 'evidence.v1', surf: '#0f1115' },
     providers: { kicker: 'Admin · gateway', title: 'Providers & rate limits', accent: 'var(--rust)', note: 'Ordem de fallback entre LLMs, limites por tier e cache por hash. Keys só no Rust.', chrome: '127.0.0.1:7878/gateway', chromeIcon: '⇄', chromeRight: 'forge-llm', surf: '#0f1115' },
     skills: { kicker: 'Admin · segurança', title: 'Skills, MCP & permissões', accent: 'var(--wire)', note: 'Vetting bloqueante de plugins de terceiros, servidores MCP e política de permissões.', chrome: '127.0.0.1:7878/skills', chromeIcon: '⬡', chromeRight: 'skill-vetter', surf: '#0f1115' },
+    memoria: { kicker: 'Usuário · Onda 6', title: 'Mapa de memória do squad', accent: 'var(--rust)', note: 'O que cada agente aprendeu (AgentMemorySystem) + recuperação semântica via RAG. Busca e esquecimento inteligente.', chrome: 'forge · memória · RAG', chromeIcon: '❋', chromeRight: 'recall', surf: '#07090d' },
+    experimentos: { kicker: 'Admin · avaliação', title: 'Experimentos A/B', accent: 'var(--ok)', note: 'Compara variantes de prompt/modelo com veredito honesto. Atribuição por telemetria ainda em instrumentação — dados semeados.', chrome: '127.0.0.1:7878/experiments', chromeIcon: '⚖', chromeRight: 'eval', surf: '#0f1115' },
+    mcp: { kicker: 'Admin · integração', title: 'Console MCP', accent: 'var(--teal)', note: 'Servidores Model Context Protocol conectados, ferramentas expostas e permissão por chamada. Cada tool herda a política do core Rust.', chrome: '127.0.0.1:7878/mcp', chromeIcon: '◈', chromeRight: 'rmcp', surf: '#0f1115' },
+    modelos: { kicker: 'Admin · telemetria', title: 'Uso por modelo', accent: 'var(--py)', note: 'Volume de chamadas e cache-hit por modelo — extraído de props.model em cada evento llm.call / cache.*.', chrome: '127.0.0.1:7878/models', chromeIcon: '◷', chromeRight: 'por modelo', surf: '#0f1115' },
+    ratelimit: { kicker: 'Admin · gateway', title: 'Rate limits por tier', accent: 'var(--rust)', note: 'Salvaguarda de custo tier-gated: small mais generoso, large mais conservador. Janela deslizante de 600s. Uso ao vivo depende de getter que o RateLimiter ainda não expõe.', chrome: '127.0.0.1:7878/rate-limits', chromeIcon: '⣿', chromeRight: 'forge-llm', surf: '#0f1115' },
+    lsp: { kicker: 'Admin · código', title: 'Language servers (LSP)', accent: 'var(--teal)', note: 'Servidores declarados em .forge/lsp.toml. Sessão preguiçosa e reusada; definição/referências/diagnósticos expostos como tools sob permissão.', chrome: '127.0.0.1:7878/lsp', chromeIcon: '⌘', chromeRight: 'stdio', surf: '#0f1115' },
+    sandbox: { kicker: 'Admin · segurança', title: 'Sandbox & skills de terceiro', accent: 'var(--amber)', note: 'Perfil de confinamento Docker (fail-closed) e ciclo de vida de skills de terceiro: instalar → vetar → habilitar / remover.', chrome: '127.0.0.1:7878/sandbox', chromeIcon: '⬢', chromeRight: 'bollard', surf: '#0f1115' },
   };
+
+  // ── A4/A5/A6/A7: dados (aterrados no código real) ──
+  rateTiers = [
+    { tier: 'Small', models: 'haiku · deepseek-chat', cap: 60, used: 12, color: 'var(--teal)' },
+    { tier: 'Medium', models: 'gpt-4o · sonnet', cap: 30, used: 19, color: 'var(--amber)' },
+    { tier: 'Large', models: 'claude-sonnet-5 · opus', cap: 15, used: 11, color: 'var(--rust)' },
+  ];
+  modelUsage = [
+    { model: 'claude-sonnet-5', tier: 'large', calls: 148, hitRate: 44, color: 'var(--rust)' },
+    { model: 'gpt-4o', tier: 'medium', calls: 96, hitRate: 39, color: 'var(--amber)' },
+    { model: 'haiku', tier: 'small', calls: 51, hitRate: 52, color: 'var(--teal)' },
+    { model: 'deepseek-chat', tier: 'small', calls: 17, hitRate: 33, color: 'var(--py)' },
+  ];
+  sandboxProfile = [
+    { k: 'image', v: 'python:3.11-slim' },
+    { k: 'rede', v: 'desabilitada (network none)' },
+    { k: 'memória', v: '512 MB' },
+    { k: 'cpu', v: '0.5 núcleo' },
+    { k: 'timeout', v: '30 s' },
+    { k: 'rootfs', v: 'read-only · único mount /work gravável' },
+    { k: 'privilégios', v: 'cap-drop ALL · no-new-privileges' },
+  ];
+  thirdSkills = [
+    { name: 'sql-explain', ver: 'v0.3.1', stage: 'habilitada', stageColor: 'var(--ok)', note: 'vetada · manifesto ok' },
+    { name: 'docker-scan', ver: 'v1.0.0', stage: 'habilitada', stageColor: 'var(--ok)', note: 'vetada · sandbox' },
+    { name: 'k6-load', ver: 'v0.2.0', stage: 'em análise', stageColor: 'var(--amber)', note: 'vetter rodando' },
+    { name: 'net-crawler', ver: 'v0.9.2', stage: 'bloqueada', stageColor: 'var(--red)', note: 'pede rede — nega' },
+  ];
+  lspServers = [
+    { id: 'rust-analyzer', lang: 'Rust', root: 'crates/', status: 'indexado', statusColor: 'var(--ok)', diags: 3, note: 'sessão viva · 12s p/ indexar' },
+    { id: 'pyright', lang: 'Python', root: 'python/', status: 'indexando', statusColor: 'var(--amber)', diags: 0, note: 'subindo processo' },
+    { id: 'tsserver', lang: 'TypeScript', root: 'web/', status: 'preguiçoso', statusColor: 'var(--faint)', diags: 0, note: 'sobe no 1º uso' },
+  ];
+  lspQueries = [
+    { q: 'definition', tool: 'lsp__rust-analyzer__definition', args: 'file · line · character (0-idx)' },
+    { q: 'references', tool: 'lsp__rust-analyzer__references', args: 'file · line · character · +declaração' },
+    { q: 'diagnostics', tool: 'lsp__rust-analyzer__diagnostics', args: 'file' },
+  ];
+
+  // ── novas telas: dados ──
+  memAgents = [
+    { agent: 'Architect', color: 'var(--py)', count: 34, top: 'padrões de arquitetura hexagonal neste repo', decay: 'estável' },
+    { agent: 'Developer', color: 'var(--ok)', count: 71, top: 'convenções de teste (pytest + hypothesis)', decay: 'reforçando' },
+    { agent: 'Auditor', color: 'var(--wire)', count: 28, top: 'regras de segurança — nunca logar segredos', decay: 'estável' },
+    { agent: 'Ops', color: 'var(--amber)', count: 19, top: 'pipeline de deploy via terraform + ansible', decay: 'esquecendo (−4)' },
+  ];
+  memHits = [
+    { q: 'como validamos entrada de usuário aqui?', score: 0.91, src: 'Developer · epoch 2', snip: 'validação centralizada em forge-core::validate, nunca no handler' },
+    { q: 'qual o padrão de erro do gateway?', score: 0.87, src: 'Architect · epoch 1', snip: 'erros do LLM viram GatewayError com fallback; nunca panic' },
+    { q: 'onde ficam os limites de rate?', score: 0.78, src: 'Ops · epoch 3', snip: 'RateLimiter tier-gated em forge-llm; hit de cache não consome vaga' },
+  ];
+  experiments = [
+    { name: 'code-review · conciso vs detalhado', status: 'concluído', statusColor: 'var(--ok)', winner: 'B (detalhado)', a: { label: 'A · conciso', rate: 71, n: 48 }, b: { label: 'B · detalhado', rate: 84, n: 51 }, verdict: 'B vence com significância', p: 'p = 0.03', sig: true },
+    { name: 'test-gen · sonnet vs haiku', status: 'rodando', statusColor: 'var(--amber)', winner: '—', a: { label: 'A · sonnet', rate: 88, n: 22 }, b: { label: 'B · haiku', rate: 64, n: 20 }, verdict: 'amostra pequena — sem veredito', p: 'p = 0.11', sig: false },
+    { name: 'commit-msg · com/sem contexto do diff', status: 'concluído', statusColor: 'var(--ok)', winner: 'inconclusivo', a: { label: 'A · com diff', rate: 79, n: 40 }, b: { label: 'B · sem diff', rate: 76, n: 40 }, verdict: 'diferença dentro do ruído', p: 'p = 0.62', sig: false },
+  ];
+  mcpServers = [
+    { name: 'filesystem', transport: 'stdio', status: 'conectado', statusColor: 'var(--ok)', tools: 6, note: 'rmcp · local' },
+    { name: 'git', transport: 'stdio', status: 'conectado', statusColor: 'var(--ok)', tools: 9, note: 'rmcp · local' },
+    { name: 'postgres', transport: 'sse', status: 'degradado', statusColor: 'var(--amber)', tools: 4, note: 'latência alta' },
+    { name: 'web-search', transport: 'sse', status: 'desconectado', statusColor: 'var(--red)', tools: 0, note: 'handshake falhou' },
+  ];
+  mcpTools = [
+    { tool: 'mcp__filesystem__read', server: 'filesystem', schema: '{path}', policy: 'allow', pColor: 'var(--ok)' },
+    { tool: 'mcp__filesystem__write', server: 'filesystem', schema: '{path, content}', policy: 'ask', pColor: 'var(--amber)' },
+    { tool: 'mcp__git__commit', server: 'git', schema: '{message}', policy: 'ask', pColor: 'var(--amber)' },
+    { tool: 'mcp__git__log', server: 'git', schema: '{max?}', policy: 'allow', pColor: 'var(--ok)' },
+    { tool: 'mcp__postgres__query', server: 'postgres', schema: '{sql}', policy: 'ask', pColor: 'var(--amber)' },
+    { tool: 'mcp__postgres__exec', server: 'postgres', schema: '{sql}', policy: 'deny', pColor: 'var(--red)' },
+  ];
 
   // ── screen data ──
   tiers = [
@@ -1126,8 +1481,8 @@ class Component extends DCLogic {
     { icon: '⟲', title: 'Replay de sessão', tag: 'TUI · dashboard', color: 'var(--py)', desc: 'Reproduzir uma sessão passo a passo a partir do ledger — cada decisão, permissão e ferramenta na ordem original.', anchor: 'ancora: ledger hash-chain + sessions.db' },
     { icon: '⚿', title: 'Aprovação em lote', tag: 'TUI', color: 'var(--wire)', desc: 'Agrupar pedidos de permissão semelhantes ("permitir bash: pytest para esta sessão") num único gate.', anchor: 'ancora: forge-core::permission' },
     { icon: '◉', title: 'Modo watch', tag: 'CLI', color: 'var(--amber)', desc: 'O agente observa testes/CI falhando e propõe a correção proativamente, sob o mesmo gate de permissão.', anchor: 'ancora: forge-tools::bash/PTY' },
-    { icon: '⚖', title: 'A/B de prompts', tag: 'dashboard', color: 'var(--ok)', desc: 'Comparar variantes da biblioteca com telemetria real: taxa de sucesso, passos, custo por tarefa.', anchor: 'ancora: forge-store::Telemetry + forge_eval' },
-    { icon: '❋', title: 'Mapa de memória do squad', tag: 'dashboard', color: 'var(--rust)', desc: 'Visualizar o que cada agente aprendeu (AgentMemorySystem) e o que o esquecimento inteligente vai podar.', anchor: 'ancora: forge_squad.memory / forgetting' },
+    { icon: '⚖', title: 'A/B de prompts', tag: '✓ entregue', color: 'var(--ok)', desc: 'Comparar variantes da biblioteca com telemetria real: taxa de sucesso, passos, custo por tarefa. Agora em Admin → Experimentos A/B.', anchor: 'tela: experimentos · forge_eval' },
+    { icon: '❋', title: 'Mapa de memória do squad', tag: '✓ entregue', color: 'var(--rust)', desc: 'Visualizar o que cada agente aprendeu (AgentMemorySystem) + recuperação semântica via RAG. Agora em Usuário → Mapa de memória.', anchor: 'tela: memoria · forge_squad.memory' },
   ];
 
   nodeStyle(n, sel, pending, mode) {
@@ -1176,7 +1531,7 @@ class Component extends DCLogic {
     const edges = st.edges || this.initialEdges();
     const selNode = nodes.find(n => n.id === st.selectedNode) || nodes[0];
     const computed = this.computeEdges(nodes, edges);
-    const browserScreens = ['telemetria', 'ledger', 'verify', 'providers', 'skills', 'sugestoes'];
+    const browserScreens = ['telemetria', 'ledger', 'verify', 'providers', 'skills', 'sugestoes', 'experimentos', 'mcp', 'modelos', 'ratelimit', 'lsp', 'sandbox'];
     const surfaceBg = browserScreens.includes(screen) ? 'var(--surf)' : 'var(--term)';
 
     return {
@@ -1199,6 +1554,8 @@ class Component extends DCLogic {
       isPrompts: screen === 'prompts', isSquad: screen === 'squad',
       isTelemetria: screen === 'telemetria', isLedger: screen === 'ledger', isVerify: screen === 'verify',
       isProviders: screen === 'providers', isSkills: screen === 'skills',
+      isMemoria: screen === 'memoria', isExperimentos: screen === 'experimentos', isMcp: screen === 'mcp',
+      isModelos: screen === 'modelos', isRatelimit: screen === 'ratelimit', isLsp: screen === 'lsp', isSandbox: screen === 'sandbox',
       // data
       tiers: this.tiers, autonomy: this.autonomy, generators: this.generators, savedPrompts: this.savedPrompts,
       squadAgents: this.squadAgents, statCards: this.statCards, eventBars: this.eventBars, teleRows: this.teleRows,
@@ -1233,6 +1590,19 @@ class Component extends DCLogic {
         : 'all:unset; cursor:pointer; font-family:var(--sans); font-weight:600; font-size:12.5px; color:#06121f; background:var(--py); border-radius:8px; padding:7px 14px;',
       goDesigner: () => this.setState({ screen: 'designer' }),
       sugestoes: this.sugestoesData,
+      memAgents: this.memAgents, memHits: this.memHits,
+      memQuery: st.memQuery,
+      memOnInput: (e) => this.onMemInput(e), memOnKey: (e) => this.onMemKey(e), memRun: () => this.runRecall(),
+      memLoading: st.memStatus === 'loading',
+      memShowIdle: st.memStatus === 'idle',
+      memShowEmpty: st.memStatus === 'done' && (!st.memResults || st.memResults.length === 0),
+      memShowResults: st.memStatus === 'done' && st.memResults && st.memResults.length > 0,
+      memResults: st.memResults || [],
+      experiments: this.experiments, mcpServers: this.mcpServers, mcpTools: this.mcpTools,
+      rateTiers: this.rateTiers.map(t => ({ ...t, pct: Math.round(t.used / t.cap * 100) + '%' })),
+      modelUsage: this.modelUsage.map(m => ({ ...m, calls: String(m.calls), barPct: Math.round(m.calls / 148 * 100) + '%', hitLabel: m.hitRate + '%' })),
+      sandboxProfile: this.sandboxProfile, thirdSkills: this.thirdSkills,
+      lspServers: this.lspServers, lspQueries: this.lspQueries,
     };
   }
 }

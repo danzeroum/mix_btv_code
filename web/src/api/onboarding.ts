@@ -1,28 +1,29 @@
-import { simulateLatency } from './client'
+/**
+ * Fase 7 Onda 13 (Modelo & Onboarding): `ENV_KEYS`/`DOCTOR_OUTPUT` (arrays
+ * estáticos, sempre "tudo verde" exceto os fallbacks marcados de propósito)
+ * saem do mock — `GET /api/doctor` (`forge-cli`, `doctor_console.rs`) agrega
+ * as 4 checagens reais (providers do gateway, `uv --version`, ping Docker,
+ * git). A checagem de providers aqui é só o resumo agregado (`N/3
+ * configurado(s)`) — nunca um preview de key mascarada (o backend nunca
+ * expôs isso, "keys só no Rust", e esta onda não muda essa fronteira). O
+ * detalhe por provider individual mora na tela Providers (Onda 12) — não
+ * duplicado aqui; esta onda foi deliberadamente aberta sem depender do
+ * merge da Onda 12 (branches sem sobreposição de arquivo), então não
+ * importa `api/providers.ts` daquela onda.
+ */
+import { fetchJson } from './client'
 
-export interface EnvKeyStatus {
-  name: string
-  detected: boolean
-  masked?: string
+export interface DoctorCheck {
+  id: 'providers' | 'uv' | 'docker' | 'git'
+  ok: boolean
+  detail: string
 }
 
-export const ENV_KEYS: EnvKeyStatus[] = [
-  { name: 'ANTHROPIC_API_KEY', detected: true, masked: 'sk-ant-••••9f3a' },
-  { name: 'DEEPSEEK_API_KEY', detected: false },
-  { name: 'OPENAI_API_KEY', detected: false },
-]
+export async function fetchDoctor(): Promise<DoctorCheck[]> {
+  const view = await fetchJson<{ checks: DoctorCheck[] }>('/api/doctor')
+  return view.checks
+}
 
-export const DOCTOR_OUTPUT = [
-  '✓ ANTHROPIC_API_KEY definida',
-  '○ DEEPSEEK_API_KEY ausente (fallback)',
-  '○ OPENAI_API_KEY ausente (fallback)',
-  '✓ uv encontrado — sidecar Python disponível',
-  '✓ git repositório detectado',
-  '✓ ledger não inicializado — será criado na 1ª sessão',
-]
-
-/** // TODO: backend Fase 5 — grava no clipboard via IPC do terminal alvo, hoje usa a Clipboard API do navegador. */
 export async function copyToClipboard(text: string): Promise<void> {
-  await simulateLatency(80)
   if (navigator.clipboard) await navigator.clipboard.writeText(text)
 }

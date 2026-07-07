@@ -13,7 +13,8 @@ export function Designer() {
       <Toolbar state={state} dispatch={dispatch} />
       {state.wfSaved && (
         <div style={{ fontSize: 12, color: 'var(--ok)', border: '1px solid var(--ok)', borderRadius: 8, padding: 8 }}>
-          ✓ squad.workflow.v1 salvo → schema validado → ledger seq 248 → orquestrador aplica na próxima forge squad
+          ✓ squad.workflow.v1 salvo → schema validado → ledger seq {state.lastSavedSeq} → aplicação real ao
+          orquestrador é trabalho futuro (os 5 agentes fixos continuam decidindo)
         </div>
       )}
       <div style={{ display: 'flex', gap: 16 }}>

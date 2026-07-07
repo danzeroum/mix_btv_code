@@ -10,5 +10,6 @@ pub mod handoff;
 pub mod ledger;
 pub mod telemetry;
 pub mod verification;
+pub mod workflow;
 
 pub use canonical::{canonical_json, request_hash, sha256_hex};

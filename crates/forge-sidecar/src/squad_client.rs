@@ -112,6 +112,14 @@ impl SquadSupervisor {
         core_socket: &Path,
         model: &str,
     ) -> Result<Self, SidecarError> {
+        // O diretório do socket é responsabilidade de quem sobe o processo,
+        // não de quem chama `spawn` — um `SquadPool` com N slots, por
+        // exemplo, não deveria precisar saber que precisa criar o diretório
+        // de antemão (achado real: faltava isso, o bind gRPC do lado Python
+        // falhava com "No such file or directory" antes desta linha existir).
+        if let Some(parent) = socket_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let _ = std::fs::remove_file(&socket_path);
         let mut cmd = Command::new("uv");
         cmd.args(["run", "python", "-m", "forge_squad.server", "--socket"])
@@ -135,6 +143,13 @@ impl SquadSupervisor {
             .spawn()
             .map_err(|e| SidecarError::Unavailable(format!("spawn do squad: {e}")))?;
         Ok(Self { child, socket_path })
+    }
+
+    /// PID do processo supervisionado — usado pelo `SquadPool` (Onda 3)
+    /// para provar estabilidade entre chamadas e detectar troca após um
+    /// restart.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
     }
 
     /// Mata o squad (SIGKILL). Em Unix, sinaliza o **grupo** de processos
@@ -185,6 +200,28 @@ impl SquadSupervisor {
                 )));
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+impl Drop for SquadSupervisor {
+    /// Achado real (Onda 4, `squad_agent`'s e2e): `kill_on_drop(true)` do
+    /// tokio só sinaliza o processo IMEDIATO (`uv`) — como `uv run` reforka
+    /// o Python como filho, isso deixava `forge_squad.server` **órfão
+    /// rodando para sempre** toda vez que um `SquadSupervisor` era dropado
+    /// sem `.kill()` explícito antes (o caso comum: fim de teste, slot do
+    /// `SquadPool` sendo substituído após detectar queda). `process_group(0)`
+    /// no `spawn` já deixava `uv` líder do próprio grupo — faltava usar
+    /// isso também no `Drop`, não só no `kill()` explícito. `Drop` não pode
+    /// ser `async`, então o sinal é enviado aqui de forma síncrona
+    /// (`libc::kill` não bloqueia) antes do reaper do tokio agir sobre o
+    /// processo imediato.
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.id() {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
         }
     }
 }

@@ -1,5 +1,25 @@
 # Levantamento de UI para o Designer — telas faltantes (pós-Fase 6)
 
+> **✅ Fechado pela Fase 7** (`docs/PLANO-FASE-7-frontend-primario.md`, 15
+> ondas). **Grupo A: 7/7 telas entregues**, cada uma com rota real e
+> fronteira de teste executável (Playwright contra o `forge dashboard`
+> real + testes Rust): A1 Console MCP e A5 Uso por modelo (Onda 7), A3 Mapa
+> de memória/RAG (Onda 8), A2 Experimentos A/B (Onda 9), A4 Rate limits +
+> A6 Sandbox & skills de terceiro + A7 Language servers (Onda 10). **Grupo
+> B fechado** — todas as telas mock ganharam rota real ao longo das Ondas
+> 1-14 (a última, Designer/"salvar honesto", na Onda 14). Critério mecânico
+> de pronto (`grep simulateLatency web/src/api`) vazio desde a Onda 15.
+>
+> **Dois descopes explícitos, registrados aqui e no código, não silenciosos:**
+> `max_autonomy_level` (`SquadTask`) é ignorado ponta-a-ponta pelo
+> orquestrador Python hoje — a autonomia real vem de
+> `ProgressiveAutonomyManager`/`agent_trust_scores` por agente, não de um
+> teto de tarefa (ADR 0021, Onda 13). `forge_squad/forgetting.py`
+> (`IntelligentForgetting`) é código morto — só o próprio teste unitário o
+> chama; o mapa de memória (A3) não mostra tendência de esquecimento por
+> isso (ADR 0022, Onda 8). Mantido aqui só como histórico da varredura
+> original — não planejar a partir deste documento.
+
 > Objetivo: mapear o que **falta de tela** (usuário ou admin) para o designer
 > criar, localizando cada item no repositório e dando o contexto de dados/ações.
 > Baseado numa varredura completa do frontend (`web/src/`) × capacidades do

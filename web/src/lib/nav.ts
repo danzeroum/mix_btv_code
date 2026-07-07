@@ -13,10 +13,17 @@ export const USER_NAV: NavItem[] = [
 
 export const ADMIN_NAV: NavItem[] = [
   { id: 'telemetria', icon: '▦', label: 'Telemetria', hint: '127.0.0.1:7878' },
+  { id: 'mcp', icon: '⎈', label: 'Console MCP', hint: 'servidores · tools · política' },
+  { id: 'modelos', icon: '◈', label: 'Uso por modelo', hint: 'chamadas · cache · tier' },
+  { id: 'memoria', icon: '⌗', label: 'Memória do squad', hint: 'mapa · busca léxica' },
+  { id: 'experimentos', icon: '⚗', label: 'Experimentos A/B', hint: 'teste z · veredito honesto' },
+  { id: 'ratelimit', icon: '⏱', label: 'Rate limits', hint: 'tetos por tier' },
+  { id: 'sandbox', icon: '⛨', label: 'Sandbox & skills de terceiro', hint: 'confinamento · docker' },
+  { id: 'lsp', icon: '⌬', label: 'Language servers', hint: '.forge/lsp.toml' },
   { id: 'ledger', icon: '⛓', label: 'Ledger / Auditoria', hint: 'hash-chain append-only' },
   { id: 'verify', icon: '✓', label: 'Verificação & Review', hint: '/verify · value_score' },
   { id: 'providers', icon: '⇄', label: 'Providers & Limites', hint: 'fallback · rate limit' },
-  { id: 'skills', icon: '⬡', label: 'Skills & Permissões', hint: 'vetting · MCP' },
+  { id: 'skills', icon: '⬡', label: 'Skills & Permissões', hint: 'vetting' },
 ]
 
 export const NAV_BY_PERSONA: Record<Persona, NavItem[]> = {
