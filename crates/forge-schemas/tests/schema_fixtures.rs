@@ -21,6 +21,8 @@
 use forge_schemas::experiment::ExperimentReport;
 use forge_schemas::handoff::HandoffEvent;
 use forge_schemas::ledger::LedgerEntry;
+use forge_schemas::persona::Persona;
+use forge_schemas::plan::Plan;
 use forge_schemas::telemetry::TelemetryEvent;
 use forge_schemas::workflow::SquadWorkflow;
 use jsonschema::validator_for;
@@ -153,6 +155,96 @@ fn squad_workflow_fixture_valida_e_desserializa() {
         !validator.is_valid(&doc["invalid_missing_removable"]),
         "documento sem 'removable' deveria reprovar o schema"
     );
+}
+
+#[test]
+fn persona_fixture_valida_e_desserializa() {
+    let schema = schema("persona");
+    let doc = fixture("persona");
+    let validator = validator_for(&schema).expect("schema compila");
+
+    assert!(
+        validator.is_valid(&doc["valid"]),
+        "fixture válida não bateu o schema: {:?}",
+        validator.iter_errors(&doc["valid"]).collect::<Vec<_>>()
+    );
+    let parsed: Persona =
+        serde_json::from_value(doc["valid"].clone()).expect("desserializa em Persona");
+    assert_eq!(parsed.id, "revisor-de-estilo");
+    assert!(parsed.validate().is_ok());
+
+    // O limiar fora de [0,1] passa pelo JSON Schema? Não — o schema também
+    // limita (minimum/maximum). Cobre as duas camadas (schema + validate()).
+    assert!(
+        !validator.is_valid(&doc["invalid_threshold_fora_de_intervalo"]),
+        "confidence_threshold=1.5 deveria reprovar o schema"
+    );
+    let parsed_invalid: Persona =
+        serde_json::from_value(doc["invalid_threshold_fora_de_intervalo"].clone())
+            .expect("desserializa mesmo com valor fora de intervalo (schema é quem barra)");
+    assert!(parsed_invalid.validate().is_err());
+}
+
+#[test]
+fn plan_fixture_valida_e_desserializa() {
+    let schema = schema("plan");
+    let doc = fixture("plan");
+    let validator = validator_for(&schema).expect("schema compila");
+
+    assert!(
+        validator.is_valid(&doc["valid"]),
+        "fixture válida não bateu o schema: {:?}",
+        validator.iter_errors(&doc["valid"]).collect::<Vec<_>>()
+    );
+    let parsed: Plan = serde_json::from_value(doc["valid"].clone()).expect("desserializa em Plan");
+    assert_eq!(parsed.execution_sequence.len(), 2);
+    assert!(parsed.validate().is_ok());
+
+    assert!(
+        !validator.is_valid(&doc["invalid_sequence_vazia"]),
+        "execution_sequence vazia deveria reprovar o schema (minItems)"
+    );
+}
+
+/// A galeria semeada de personas (`schemas/personas/**/*.json`) é CONTEÚDO:
+/// cada arquivo tem que bater o `persona.v1` e passar a validação semântica.
+/// Uma persona quebrada na galeria é um bug de conteúdo — pega aqui, não em
+/// produção.
+#[test]
+fn galeria_de_personas_valida_contra_persona_v1() {
+    let schema = schema("persona");
+    let validator = validator_for(&schema).expect("schema compila");
+    let dir = format!("{}/../../schemas/personas", env!("CARGO_MANIFEST_DIR"));
+
+    fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect(&path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    collect(std::path::Path::new(&dir), &mut files);
+    assert!(!files.is_empty(), "esperava personas semeadas na galeria");
+
+    for file in files {
+        let raw = std::fs::read_to_string(&file).unwrap();
+        let doc: Value = serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{file:?}: {e}"));
+        assert!(
+            validator.is_valid(&doc),
+            "persona {file:?} não bateu o schema: {:?}",
+            validator.iter_errors(&doc).collect::<Vec<_>>()
+        );
+        let persona: Persona = serde_json::from_value(doc)
+            .unwrap_or_else(|e| panic!("{file:?} não desserializa: {e}"));
+        persona
+            .validate()
+            .unwrap_or_else(|e| panic!("{file:?} inválida: {e}"));
+    }
 }
 
 /// Sem tipo Rust/Python — só protege o schema em si (sintaxe/drift), não

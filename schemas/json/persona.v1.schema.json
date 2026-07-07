@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forge.buildtovalue.dev/schemas/persona.v1.schema.json",
+  "title": "persona.v1",
+  "description": "Persona de squad como conteúdo (BuildToValue): item de galeria com identidade, modelos mentais (referências canônicas da área), princípios, escada de autonomia DESCRITIVA (rótulo, não loop automático — ADR 0021), gatilhos de ativação e contratos de handoff. Publicar uma persona é conteúdo, não código.",
+  "type": "object",
+  "required": ["id", "display_name", "domain", "autonomy", "activation_triggers", "communication"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "display_name": { "type": "string", "minLength": 1 },
+    "domain": { "type": "string", "minLength": 1, "examples": ["editorial", "juridico", "musica", "software", "bi"] },
+    "mental_models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["reference", "apply_when"],
+        "properties": {
+          "reference": { "type": "string" },
+          "apply_when": { "type": "string" }
+        }
+      }
+    },
+    "core_principles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description", "validation", "severity"],
+        "properties": {
+          "id": { "type": "string" },
+          "description": { "type": "string" },
+          "validation": { "type": "string" },
+          "severity": { "enum": ["low", "medium", "high", "critical"] }
+        }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "required": ["level", "can_veto"],
+      "properties": {
+        "level": { "enum": ["L1", "L2", "L3", "L4", "L5"] },
+        "can_decide_alone": { "type": "array", "items": { "type": "string" } },
+        "requires_approval": { "type": "array", "items": { "type": "string" } },
+        "can_veto": { "type": "boolean" }
+      }
+    },
+    "activation_triggers": {
+      "type": "object",
+      "required": ["confidence_threshold"],
+      "properties": {
+        "semantic_patterns": { "type": "array", "items": { "type": "string" } },
+        "context_keywords": { "type": "array", "items": { "type": "string" } },
+        "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "communication": {
+      "type": "object",
+      "required": ["handoff_contract"],
+      "properties": {
+        "receives_from": { "type": "array", "items": { "type": "string" } },
+        "delivers_to": { "type": "array", "items": { "type": "string" } },
+        "handoff_contract": { "type": "string" }
+      }
+    },
+    "delivery_formats": { "type": "array", "items": { "type": "string" } }
+  }
+}

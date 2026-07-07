@@ -1,0 +1,39 @@
+{
+  "$comment": "Fixture golden do contrato persona.v1. Valida contra schemas/json/persona.v1.schema.json e desserializa em forge_schemas::persona::Persona (Rust, tests/schema_fixtures.rs). Só há tipo do lado Rust hoje; a galeria (schemas/personas/*.json) consome o mesmo schema.",
+  "valid": {
+    "id": "revisor-de-estilo",
+    "display_name": "Revisor de estilo",
+    "domain": "editorial",
+    "mental_models": [
+      { "reference": "The Elements of Style — Strunk & White", "apply_when": "clareza e concisão" }
+    ],
+    "core_principles": [
+      { "id": "voz-ativa", "description": "prefira voz ativa", "validation": "manual", "severity": "medium" }
+    ],
+    "autonomy": {
+      "level": "L3",
+      "can_decide_alone": ["ajustes de estilo"],
+      "requires_approval": ["mudança de sentido"],
+      "can_veto": false
+    },
+    "activation_triggers": {
+      "semantic_patterns": ["revisar", "clareza"],
+      "context_keywords": ["texto", "artigo"],
+      "confidence_threshold": 0.6
+    },
+    "communication": {
+      "receives_from": ["redator"],
+      "delivers_to": ["fact-checker"],
+      "handoff_contract": "artigo.md + notas de revisão"
+    },
+    "delivery_formats": ["DOCX", "Markdown", "HTML"]
+  },
+  "invalid_threshold_fora_de_intervalo": {
+    "id": "revisor-de-estilo",
+    "display_name": "Revisor de estilo",
+    "domain": "editorial",
+    "autonomy": { "level": "L3", "can_veto": false },
+    "activation_triggers": { "confidence_threshold": 1.5 },
+    "communication": { "handoff_contract": "artigo.md" }
+  }
+}

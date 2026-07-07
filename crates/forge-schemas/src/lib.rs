@@ -8,6 +8,8 @@ pub mod canonical;
 pub mod experiment;
 pub mod handoff;
 pub mod ledger;
+pub mod persona;
+pub mod plan;
 pub mod telemetry;
 pub mod verification;
 pub mod workflow;

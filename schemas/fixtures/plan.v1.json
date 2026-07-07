@@ -1,0 +1,36 @@
+{
+  "$comment": "Fixture golden do contrato plan.v1. Valida contra schemas/json/plan.v1.schema.json e desserializa em forge_schemas::plan::Plan (Rust, tests/schema_fixtures.rs). O invalid cobre execution_sequence vazia (minItems).",
+  "valid": {
+    "prerequisites": { "contracts": ["persona.v1"], "approvals": [], "dependencies": [] },
+    "execution_sequence": [
+      {
+        "order": 1,
+        "primary_role": "pauteiro",
+        "support_roles": [],
+        "deliverables": ["pauta.md"],
+        "approval_required": true,
+        "estimated_confidence": 0.8,
+        "quality_gates": ["revisao:pass"]
+      },
+      {
+        "order": 2,
+        "primary_role": "redator",
+        "support_roles": ["revisor-de-estilo"],
+        "deliverables": ["artigo.docx"],
+        "approval_required": true,
+        "estimated_confidence": 0.75,
+        "quality_gates": ["fact-check:pass"]
+      }
+    ],
+    "success_criteria": {
+      "functional": ["artigo cobre o briefing"],
+      "non_functional": ["tom consistente"]
+    },
+    "budget": { "estimated_cost": 0.5, "max_llm_calls": 20 },
+    "rollback_strategy": { "kill_switch": true }
+  },
+  "invalid_sequence_vazia": {
+    "execution_sequence": [],
+    "budget": { "estimated_cost": 0.5, "max_llm_calls": 20 }
+  }
+}
