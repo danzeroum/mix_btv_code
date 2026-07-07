@@ -249,6 +249,11 @@ class UnifiedOrchestrator:
                 "description": step.get("description", ""),
                 "action": step.get("action", ""),
                 "step": step.get("step"),
+                # Resultados reais dos passos já concluídos (não fabricados,
+                # não resumo sintético) — sem isto, uma ação "validate"
+                # mapeada pro auditor (`_select_agent_for_step`) não tinha
+                # NENHUM contexto do que os passos anteriores produziram.
+                "prior_results": list(results),
             }
             result = await self.agents[agent_name].execute(step_task)
             quality = await self.evaluator.evaluate_agent_performance(agent_name, result)

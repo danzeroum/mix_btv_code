@@ -41,7 +41,7 @@ Responda SOMENTE com um objeto JSON:
   "notes": "string — sua avaliação dos achados e do contexto para ESTA tarefa",
   "additional_checks": ["lista de strings — verificações adicionais recomendadas, se houver"]
 }
-Não aprove automaticamente só porque não há achados críticos na lista — considere a criticidade e o contexto da tarefa. Não reprove automaticamente por qualquer achado menor — pondere severidade."""
+Não aprove automaticamente só porque não há achados críticos na lista — considere a criticidade e o contexto da tarefa. Não reprove automaticamente por qualquer achado menor — pondere severidade. Você NUNCA tem acesso ao sistema de arquivos nem executou nenhuma ferramenta — NUNCA afirme que um arquivo foi criado, salvo ou persistido em disco; avalie somente o texto e os achados reportados."""
 
 _VALIDATE_RESULTS_SYSTEM_PROMPT = """Você é um auditor revisando os resultados de uma equipe de agentes especialistas antes de aprovar a conclusão de uma tarefa.
 Responda SOMENTE com um objeto JSON:
@@ -51,7 +51,7 @@ Responda SOMENTE com um objeto JSON:
   "issues": ["lista de strings — problemas encontrados nos resultados, se houver"],
   "agent_scores": {"nome_do_agente": 0.0}
 }
-Avalie cada resultado pelo conteúdo real reportado (sucesso, confiança declarada, presença de erros) — não aprove por padrão. Quando houver evidência determinística de verificação (`verification_evidence` — typecheck/test/lint/SAST reais), pese o veredito e os achados dela — um veredito "fail" ou achados de severidade alta pesam contra a aprovação, mas a decisão final ainda é sua, considerando o contexto da tarefa."""
+Avalie cada resultado pelo conteúdo real reportado (sucesso, confiança declarada, presença de erros) — não aprove por padrão. Quando houver evidência determinística de verificação (`verification_evidence` — typecheck/test/lint/SAST reais), pese o veredito e os achados dela — um veredito "fail" ou achados de severidade alta pesam contra a aprovação, mas a decisão final ainda é sua, considerando o contexto da tarefa. Os agentes reportam apenas o texto que AFIRMAM ter produzido — nenhuma ferramenta grava em disco nesta etapa. NUNCA afirme que um artefato existe, foi salvo ou foi persistido no filesystem; isso não está nos resultados que você recebe."""
 
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -99,21 +99,24 @@ class AuditorAgent(BaseAgent):
         issues = self.check_security(task.get("code", "")) if task.get("code") else []
         warnings = self.check_quality(task.get("metrics", {})) if task.get("metrics") else []
 
+        payload: dict[str, Any] = {
+            "task_description": task.get("description", ""),
+            "security_issues": issues,
+            "quality_warnings": warnings,
+        }
+        # Quando este audit() é a ação "validate" de um passo do plano (não
+        # a proposta inicial), `_execute_plan_steps` (orchestrator.py) anexa
+        # os resultados reais dos passos anteriores — sem isto, a auditoria
+        # per-step era cega até ao texto que o developer disse ter
+        # produzido, não só ao filesystem.
+        if task.get("prior_results"):
+            payload["prior_agent_results"] = task["prior_results"]
+
         request = LlmRequest(
             model=self.model,
             messages=[
                 {"role": "system", "content": _AUDIT_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "task_description": task.get("description", ""),
-                            "security_issues": issues,
-                            "quality_warnings": warnings,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             requester=self.agent_type,
         )

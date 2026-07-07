@@ -1282,3 +1282,62 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   dashboard subiria sem provider nenhum configurado — bug adjacente, não o
   reportado, mas bloqueava o mesmo fluxo (squad/sessão pelo navegador) então
   corrigi junto em vez de deixar half-fixed.
+
+## Squad como executor — Onda 0 (honestidade do auditor)
+
+- **[contexto] Um parecer de engenharia externo (baseado num run real na VPS
+  — `forge squad "crie uma calculadora científica... gere um .html"` não
+  produziu arquivo nenhum) diagnosticou a causa raiz: o squad não tem
+  executor nem canal de artefato — `CoreService::RunTool`
+  (`core_server.rs:99`) devolve `Unimplemented` de propósito, o developer
+  (`developer.py`) faz uma única chamada de LLM e nunca toca disco, e o
+  auditor julga sem ver o resultado real. Conferi as citações (arquivo:linha)
+  contra o repo — quase todas exatas. Decisão de arquitetura endossada:
+  `RunTool` real no Rust (o contrato já existe no proto, zero breaking) +
+  loop ReAct no developer — não um "shuttle" do `final_output` pelo stream
+  de eventos. Onda 1 (o executor) e Onda 2 (o loop) ficam para depois; esta
+  entrega é só a Onda 0, que não depende delas.
+- **[correção ao parecer] O auditor não é cego à saída do developer do jeito
+  que o parecer generalizou.** `validate_results` (chamado incondicionalmente
+  ao fim de `execute_complex_task`, `orchestrator.py:155`) **já recebia**
+  `execution_results` de verdade, incluindo o `final_output` real — o
+  veredito que decide `overall_success` não era cego ao conteúdo. A cegueira
+  genuína era só a chamada per-step `audit()` (quando o plano inclui uma
+  ação `"validate"` explícita, mapeada pro auditor via
+  `_select_agent_for_step`): `step_task` (`orchestrator.py:248-252`) era
+  montado só com `description`/`action`/`step` do plano, sem nenhum
+  resultado anterior. Isso mudou o escopo do fix de "rotear resultados pro
+  auditor" (já acontecia) para dois pontos mais específicos:
+  1. `auditor.py`: `_AUDIT_SYSTEM_PROMPT` e `_VALIDATE_RESULTS_SYSTEM_PROMPT`
+     ganharam proibição explícita de alegar que um arquivo foi
+     criado/salvo/persistido — nenhum caminho tem evidência de filesystem
+     hoje (sem `RunTool`, nada escreve disco), então nenhum dos dois pode
+     honestamente afirmar isso, mesmo vendo o `final_output` real.
+  2. `orchestrator.py::_execute_plan_steps`: `step_task` ganhou
+     `prior_results` (os resultados reais acumulados até aquele passo, não
+     um resumo sintético) — fecha a cegueira específica do `audit()`
+     per-step. `auditor.py::audit()` repassa isso ao gateway como
+     `prior_agent_results` quando presente (não fabrica a chave quando
+     ausente — proposta inicial em `_get_squad_proposals` continua sem
+     ela).
+- **[decisão] `run_tool` "morto" não é herança de `CoreBackend`.** O trait
+  (`core_server.rs:27-34`) só declara `generate`/`request_permission` — o
+  `run_tool` que devolve `Unimplemented` (linha 99) está hardcoded direto no
+  `impl<B: CoreBackend> CoreService for CoreServer<B>`, idêntico pra
+  qualquer `B`. Não muda o plano da Onda 1 (que já propõe corretamente
+  adicionar o método ao trait), só corrige a descrição do mecanismo — não
+  há o que "herdar" hoje, porque não existe hook nenhum pra um backend
+  fornecer isso.
+- **[nota] Testes novos são todos deterministicos via `ScriptedGatewayClient`/
+  `RoutingGatewayClient`** (nenhuma chamada de rede/LLM real) — provam a
+  proibição textual do prompt, a presença/ausência condicional de
+  `prior_agent_results` no payload, e o fluxo ponta a ponta (plano de 2
+  passos "implement"→"validate" via `UnifiedOrchestrator` real) mostrando
+  que só a chamada per-step do auditor carrega `prior_agent_results`, com o
+  `final_output` real do developer dentro.
+- **[gap remanescente, fora desta entrega] Onda 1 (RunTool real) e Onda 2
+  (loop ReAct do developer)** ficam para PRs futuras — são a peça que faz
+  um arquivo aparecer de verdade no disco. Definição de pronto proposta
+  pelo parecer (e que endosso): `forge squad "crie X.html..."` produzindo
+  `X.html` real no workspace, registrado no ledger, com o auditor julgando
+  sobre um artefato que existe — não sobre uma alegação de texto.

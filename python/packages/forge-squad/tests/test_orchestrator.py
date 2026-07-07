@@ -170,6 +170,74 @@ def test_verification_evidence_presente_flui_para_validate_results(tmp_path):
     assert "verification_evidence" in auditor_calls[1].messages[1]["content"]
 
 
+def test_step_task_de_validate_recebe_resultados_reais_dos_passos_anteriores(tmp_path):
+    # Antes desta correção, o step_task de uma ação "validate" só carregava
+    # description/action/step do plano — o auditor per-step era cego até ao
+    # texto que o developer disse ter produzido, não só ao filesystem
+    # (RunTool ainda não existe). Plano de 2 passos sequenciais (o 1º tem
+    # `dependencies` não-vazio só pra escapar do caminho paralelo de
+    # `_can_parallelize` e provar a passagem via step_task simples).
+    gateway = RoutingGatewayClient(
+        {
+            "planner": LlmResponse(
+                text=json.dumps(
+                    {
+                        "steps": [
+                            {
+                                "step": 1,
+                                "action": "implement",
+                                "description": "criar arquivo",
+                                "estimated_time": 5,
+                                "dependencies": ["seed"],
+                                "can_fail": True,
+                            },
+                            {
+                                "step": 2,
+                                "action": "validate",
+                                "description": "validar arquivo",
+                                "estimated_time": 5,
+                                "dependencies": [1],
+                                "can_fail": True,
+                            },
+                        ],
+                        "estimated_duration": 10,
+                        "confidence": 0.8,
+                    }
+                )
+            ),
+            "architect": LlmResponse(
+                text=json.dumps({"problem_analysis": "x", "recommendation": "y", "architecture": "z", "components": [], "confidence": 0.9})
+            ),
+            "developer": LlmResponse(
+                text=json.dumps({"final_output": "conteudo-real-do-developer", "status": "completed", "confidence": 0.9})
+            ),
+            "auditor": LlmResponse(
+                text=json.dumps({"passed": True, "approved": True, "confidence": 0.9, "notes": "ok", "issues": [], "agent_scores": {}, "additional_checks": []})
+            ),
+            "designer": LlmResponse(text=json.dumps({"pattern": "x", "components": [], "confidence": 0.8})),
+            "ops": LlmResponse(text=json.dumps({"strategy": "x", "stages": [], "confidence": 0.8})),
+        }
+    )
+    # Conteúdos de proposta heterogêneos (arch/dev/aud não concordam em
+    # forma) podem disparar HITL por consenso fraco — irrelevante pro que
+    # este teste prova, então aprova automaticamente pra chegar no step.
+    orch = UnifiedOrchestrator(
+        gateway,
+        permission_client=ScriptedPermissionClient([PermissionDecision(approved=True)]),
+        memory=AgentMemorySystem(storage_dir=tmp_path),
+    )
+    asyncio.run(orch.execute_complex_task({"description": "criar e validar arquivo"}))
+
+    # Das chamadas do auditor (proposta + step "validate" + validate_results
+    # final), só a do step carrega prior_agent_results — e o final_output
+    # real do developer está lá dentro, não só metadados do plano.
+    audit_step_calls = [
+        c for c in gateway.calls if c.requester == "auditor" and "prior_agent_results" in c.messages[1]["content"]
+    ]
+    assert len(audit_step_calls) == 1
+    assert "conteudo-real-do-developer" in audit_step_calls[0].messages[1]["content"]
+
+
 def test_propostas_sao_envolvidas_em_proposal_e_consenso_computa(tmp_path):
     # Se o wrapping Proposal(...) falhasse, reach_consensus levantaria; aqui
     # provamos que o consenso computou um decision_maker real.

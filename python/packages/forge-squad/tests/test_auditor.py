@@ -1,7 +1,11 @@
 import asyncio
 import json
 
-from forge_squad.agents.auditor import AuditorAgent
+from forge_squad.agents.auditor import (
+    _AUDIT_SYSTEM_PROMPT,
+    _VALIDATE_RESULTS_SYSTEM_PROMPT,
+    AuditorAgent,
+)
 from forge_squad.gateway import LlmResponse, ScriptedGatewayClient
 
 
@@ -142,6 +146,46 @@ def test_execute_sem_gateway_levanta_erro_claro():
         assert False, "deveria ter levantado RuntimeError"
     except RuntimeError as exc:
         assert "attach_gateway" in str(exc)
+
+
+def test_prompts_de_auditoria_proibem_alegar_persistencia_de_arquivo():
+    # Nenhum caminho do auditor tem evidência de filesystem hoje (RunTool
+    # ainda não existe, ver core_server.rs) — os dois prompts têm que
+    # proibir a alegação explicitamente, não só "não mencionar" por acaso.
+    assert "NUNCA afirme" in _AUDIT_SYSTEM_PROMPT
+    assert "NUNCA afirme" in _VALIDATE_RESULTS_SYSTEM_PROMPT
+
+
+def test_audit_repassa_resultados_anteriores_reais_como_evidencia_ao_gateway():
+    # Quando audit() é a ação "validate" de um passo do plano (não a
+    # proposta inicial), orchestrator.py anexa os resultados reais dos
+    # passos anteriores em `prior_results` — antes desta correção, o
+    # auditor per-step não recebia nada além de description/action/step.
+    payload = {"passed": True, "confidence": 0.8, "notes": "ok", "additional_checks": []}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    prior = [{"agent": "developer", "final_output": "<html>calculadora</html>", "success": True}]
+    asyncio.run(agent.audit({"description": "validar arquivo gerado", "prior_results": prior}))
+
+    sent_content = gateway.requests[0].messages[1]["content"]
+    assert "prior_agent_results" in sent_content
+    assert "calculadora" in sent_content
+
+
+def test_audit_sem_prior_results_nao_inclui_a_chave_no_payload():
+    # A proposta inicial (`_get_squad_proposals`) chama audit() sem
+    # `prior_results` — o payload não deve ganhar uma chave vazia/fabricada.
+    payload = {"passed": True, "confidence": 0.8, "notes": "ok", "additional_checks": []}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    asyncio.run(agent.audit({"description": "revisar plano"}))
+
+    sent_content = gateway.requests[0].messages[1]["content"]
+    assert "prior_agent_results" not in sent_content
 
 
 def test_resposta_sem_json_cai_no_fallback_honesto_nao_aprovado():
