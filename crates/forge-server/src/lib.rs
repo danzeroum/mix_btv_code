@@ -24,6 +24,7 @@ use axum::Router;
 use forge_llm::model_tier::{tier_from_id, ModelTier};
 use forge_llm::rate_limit::RateLimiter;
 use forge_schemas::experiment::{ExperimentReport, VariantStats};
+use forge_schemas::workflow::SquadWorkflow;
 use forge_store::{LedgerStore, PromptLibrary, Telemetry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -119,6 +120,7 @@ pub fn router(
         .route("/api/providers", get(list_providers))
         .route("/api/verify/run", post(run_verify_start))
         .route("/api/verify/{id}", get(get_verify_status))
+        .route("/api/designer/workflow", post(save_workflow))
         .fallback_service(serve_dir)
         .with_state(AppState {
             telemetry,
@@ -652,6 +654,60 @@ async fn verify_ledger(State(state): State<AppState>) -> Response {
             error: Some(format!("cadeia corrompida na seq {seq}")),
         })
         .into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+#[derive(Serialize)]
+struct SaveWorkflowResponse {
+    seq: u64,
+    workflow_id: &'static str,
+}
+
+/// `POST /api/designer/workflow` (Fase 7 Onda 14) — valida o grafo do Squad
+/// Designer contra `squad.workflow.v1` (schema + integridade de arestas via
+/// `SquadWorkflow::validate_edges`) e grava no ledger (mesmo
+/// `LedgerStore::append` que toda outra escrita de auditoria já usa — zero
+/// mudança de ledger). "Salvar honesto": confirma que o grafo foi validado e
+/// persistido, nunca que o orquestrador passou a usá-lo — os 5 agentes
+/// fixos do `UnifiedOrchestrator` continuam decidindo, sem reescrita nesta
+/// fase (aplicar o grafo real é trabalho futuro).
+async fn save_workflow(
+    State(state): State<AppState>,
+    Json(workflow): Json<SquadWorkflow>,
+) -> Response {
+    if let Err(e) = workflow.validate_edges() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrorBody::new("invalid_workflow", e)),
+        )
+            .into_response();
+    }
+    let payload = match serde_json::to_value(&workflow) {
+        Ok(v) => v,
+        Err(e) => return db_error(e),
+    };
+    let entry = forge_schemas::ledger::LedgerEntry {
+        seq: 0,
+        prev_hash: String::new(),
+        entry_hash: String::new(),
+        kind: "designer.workflow_saved".into(),
+        actor: "web:designer".into(),
+        payload,
+        r#override: None,
+        fake_marker: None,
+        ts: now_rfc3339(),
+    };
+    let mut ledger = state.ledger.lock().unwrap_or_else(|e| e.into_inner());
+    match ledger.append(entry) {
+        Ok(saved) => (
+            StatusCode::CREATED,
+            Json(SaveWorkflowResponse {
+                seq: saved.seq,
+                workflow_id: "squad.workflow.v1",
+            }),
+        )
+            .into_response(),
         Err(e) => db_error(e),
     }
 }
@@ -1260,6 +1316,112 @@ mod tests {
         assert_eq!(json["ok"], true);
         assert_eq!(json["verified"], 2);
         assert!(json.get("error").is_none());
+    }
+
+    fn workflow_body(edges: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "nodes": [
+                {
+                    "id": "task", "x": 0.0, "y": 0.0, "kind": "pill", "name": "tarefa",
+                    "role": "entrada", "color": "c", "icon": "▸", "sub": "", "params": [],
+                    "removable": false
+                },
+                {
+                    "id": "architect", "x": 10.0, "y": 10.0, "kind": "card", "name": "architect",
+                    "role": "arquitetura", "color": "c", "icon": "◆", "sub": "", "params": [],
+                    "removable": true
+                }
+            ],
+            "edges": edges,
+        })
+    }
+
+    /// Fronteira da Onda 14 (Designer, "salvar honesto"): grafo válido grava
+    /// no MESMO ledger que a rota de leitura já usa — lido direto de volta
+    /// (não uma segunda fonte de verdade), `seq` real (não fabricado no
+    /// cliente), `kind`/`actor` corretos.
+    #[tokio::test]
+    async fn salvar_workflow_valido_grava_no_ledger_e_e_lido_de_volta() {
+        let ledger = ledger_vazio();
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            Arc::clone(&ledger),
+            web_dir.path(),
+            web_dir.path(),
+        );
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/designer/workflow")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        workflow_body(serde_json::json!([{"from": "task", "to": "architect"}]))
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["seq"], 1);
+        assert_eq!(json["workflow_id"], "squad.workflow.v1");
+
+        // Lido direto do MESMO storage por trás da rota — não uma segunda
+        // cópia inventada na resposta HTTP.
+        let store = ledger.lock().unwrap();
+        let entries = store.recent(10, None).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "designer.workflow_saved");
+        assert_eq!(entries[0].actor, "web:designer");
+        assert_eq!(entries[0].payload["nodes"].as_array().unwrap().len(), 2);
+    }
+
+    /// Grafo malformado (aresta pra nó inexistente) é rejeitado com erro
+    /// claro (422, citando o id) — não salvo silenciosamente. O ledger
+    /// continua vazio: a validação acontece ANTES do `append`, não depois.
+    #[tokio::test]
+    async fn salvar_workflow_com_aresta_pendente_e_rejeitado_e_nao_grava_nada() {
+        let ledger = ledger_vazio();
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            Arc::clone(&ledger),
+            web_dir.path(),
+            web_dir.path(),
+        );
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/designer/workflow")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        workflow_body(serde_json::json!([{"from": "task", "to": "fantasma"}]))
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["error"].as_str().unwrap().contains("fantasma"));
+
+        let store = ledger.lock().unwrap();
+        assert_eq!(store.recent(10, None).unwrap().len(), 0);
     }
 
     /// Fronteira da Onda 7 (A5): `GET /api/models/usage` bate por igualdade

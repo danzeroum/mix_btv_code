@@ -12,6 +12,8 @@ export interface DesignerState {
   grabDY: number
   addCount: number
   wfSaved: boolean
+  /** `seq` real do ledger devolvido por `POST /api/designer/workflow` — `null` antes do 1º save. */
+  lastSavedSeq: number | null
 }
 
 export type DesignerAction =
@@ -24,7 +26,7 @@ export type DesignerAction =
   | { type: 'REMOVE_NODE'; id: string }
   | { type: 'SELECT_NODE'; id: string | null }
   | { type: 'RESET' }
-  | { type: 'MARK_SAVED' }
+  | { type: 'MARK_SAVED'; seq: number }
 
 export function initDesignerState(): DesignerState {
   return {
@@ -38,6 +40,7 @@ export function initDesignerState(): DesignerState {
     grabDY: 0,
     addCount: 0,
     wfSaved: false,
+    lastSavedSeq: null,
   }
 }
 
@@ -121,6 +124,6 @@ export function designerReducer(state: DesignerState, action: DesignerAction): D
       return initDesignerState()
 
     case 'MARK_SAVED':
-      return { ...state, wfSaved: true }
+      return { ...state, wfSaved: true, lastSavedSeq: action.seq }
   }
 }

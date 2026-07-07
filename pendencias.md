@@ -1095,3 +1095,44 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   providers já tem fronteira determinística a nível Rust
   (`doctor_agrega_as_4_checagens_com_providers_real`, com isolamento de env
   var) — reafirmar no Playwright seria uma segunda cópia do mesmo teste.
+
+## Onda 14 — Designer (salvar honesto)
+
+- **[decisão] `squad.workflow.v1` novo (JSON Schema + tipo Rust +
+  fixture golden), mesmo padrão de `experiment.v1`** — `SquadWorkflow{nodes,
+  edges}` (`crates/forge-schemas/src/workflow.rs`), com `WorkflowNodeKind`
+  espelhando o union `'card'|'pill'` do TS como enum (`#[serde(rename_all =
+  "snake_case")]`, mesma convenção de `ModelTier`/`ExperimentVerdict`). A
+  checagem semântica (aresta referencia nó inexistente) NÃO é expressável em
+  JSON Schema puro — fica em `SquadWorkflow::validate_edges` (Rust puro,
+  testada isoladamente); a fixture golden só prova forma (campo obrigatório
+  ausente reprova o schema), não a checagem de aresta.
+- **[decisão] `POST /api/designer/workflow` direto em `forge-server`**
+  (mesma classe de posicionamento de A2/A5/A12 — só precisa de
+  `forge-store`/`forge-schemas`, já dependências do crate). Valida
+  `validate_edges()` ANTES de qualquer escrita — grafo malformado nunca
+  chega a tocar o ledger (provado por teste: ledger continua com 0 entradas
+  após um 422). Grafo válido grava via o MESMO `LedgerStore::append` que
+  toda outra escrita de auditoria da plataforma já usa (zero mudança de
+  ledger) — `kind: "designer.workflow_saved"`, `actor: "web:designer"`,
+  `payload` é o grafo serializado direto (sem DTO espelho).
+- **[decisão] "Salvar honesto" tocou os 2 lados da mentira antiga, não só
+  o backend**: o mock antigo (`saveWorkflow`) fabricava `seq: 248` fixo E
+  a cópia da tela prometia "orquestrador aplica na próxima forge squad" —
+  nunca foi real (`UnifiedOrchestrator` continua com os 5 agentes fixos,
+  sem reescrita nesta fase). Os dois foram corrigidos juntos:
+  `MARK_SAVED` (reducer) ganhou o campo `seq` real (antes não carregava
+  nenhum), e a cópia (banner em `Designer.tsx`, toast em `Toolbar.tsx`,
+  botão "salvar & aplicar" → "salvar") declara só "salvo e validado —
+  aplicação real é trabalho futuro". Corrigir só um dos dois teria deixado
+  a outra metade da mentira de pé.
+- **[nota] Grafo padrão (`templates.ts`'s `initialNodes`/`initialEdges`,
+  8 nós, várias arestas) já é válido e não-trivial** — a fronteira por
+  Playwright não precisa arrastar nem conectar nada na tela: clicar
+  "salvar" no estado inicial já exercita `POST /api/designer/workflow` de
+  ponta a ponta com um grafo real. Testar o caso de aresta pendente
+  (422) pela UI não é possível de propósito: `REMOVE_NODE` do próprio
+  reducer já remove as arestas de um nó ao removê-lo — a UI estruturalmente
+  não deixa construir um grafo inválido por interação normal. Esse caso
+  fica só no teste Rust (`salvar_workflow_com_aresta_pendente...`), que
+  constrói o corpo HTTP direto, sem passar pela UI.
