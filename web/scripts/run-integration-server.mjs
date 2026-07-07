@@ -173,6 +173,18 @@ writeFileSync(
 // do teste Rust — consenso fraco de propósito, exercita o gate HITL real);
 // nenhum teste de integração hoje envia mensagem de chat, então isso não
 // muda o comportamento observado pelos specs existentes.
+// Fase 7 Onda 12: as 3 chaves de provider são removidas do env herdado e só
+// ANTHROPIC_API_KEY é redefinida com um valor fake — determinístico
+// independente do que o runner (CI ou dev local) tenha de verdade no
+// ambiente, para `GET /api/providers` (`Gateway::from_env`) provar
+// exatamente 1 `configured: true` (anthropic) e 2 `false`.
+const {
+  ANTHROPIC_API_KEY: _ignoredAnthropicKey,
+  DEEPSEEK_API_KEY: _ignoredDeepseekKey,
+  OPENAI_API_KEY: _ignoredOpenaiKey,
+  ...envWithoutProviderKeys
+} = process.env
+
 const manifestPath = join(repoRoot, 'Cargo.toml')
 const child = spawn(
   'cargo',
@@ -182,7 +194,12 @@ const child = spawn(
   ],
   {
     cwd: workDir,
-    env: { ...process.env, FORGE_WEB_DIR: webDist, FORGE_SCRIPTED: '1' },
+    env: {
+      ...envWithoutProviderKeys,
+      FORGE_WEB_DIR: webDist,
+      FORGE_SCRIPTED: '1',
+      ANTHROPIC_API_KEY: 'e2e-fake-anthropic-key',
+    },
     stdio: 'inherit',
   },
 )

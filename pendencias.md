@@ -936,3 +936,57 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   trabalho não pedido aqui — mantive os mocks intactos (só migrados de
   `api/verify.ts` pro mesmo arquivo, já que o módulo inteiro foi reescrito)
   com um comentário explícito marcando o não-escopo, não deixado implícito.
+
+## Onda 12 — Providers (piso; degrau descartado, não só adiado)
+
+- **[decisão] Só o piso (leitura real) foi construído — o degrau (reordenar
+  fallback, ajustar teto do rate limiter pela UI) foi descartado, não
+  deixado para depois.** Dois motivos independentes, cada um já suficiente
+  sozinho: (1) `forge_llm::FallbackChain` (`provider.rs`) é código morto —
+  `Gateway::generate` itera `self.providers` direto e nunca consulta
+  `FallbackChain::next_after`, confirmado lendo o código antes de expor
+  qualquer mutação; mutar uma estrutura que o gateway real nunca lê seria
+  fake por definição. (2) mesmo que fosse consultada, o `forge dashboard` é
+  um processo separado de qualquer sessão `forge run`/`chat` real — a mesma
+  descoberta já registrada na Onda 10 sobre "uso ao vivo" do `RateLimiter`.
+  Uma mutação aqui não mudaria o comportamento de nenhuma sessão de
+  verdade. Documentado como descope explícito, não como "não deu tempo".
+- **[decisão] `KNOWN_PROVIDERS: [&str; 3] = ["anthropic", "deepseek",
+  "openai"]` é uma constante de ordem fixa, não descoberta em runtime.**
+  Espelha a ordem de fallback real que `Gateway::from_env` monta (comentário
+  no código aponta a mesma conclusão do achado do `FallbackChain`). `GET
+  /api/providers` cruza essa lista com `gateway.available()` — o mesmo
+  `HashSet` que uma sessão real usaria para decidir quem está configurado —
+  então `configured` nunca é fabricado no cliente.
+- **[decisão] `ProviderInfo` (`web/src/types/domain.ts`) encolhido para
+  `{id, configured}`**, removendo os campos mock `name`/`status:
+  'ativo'|'standby'` que a tela antiga usava. `RateLimitTier` (tipo
+  mock, não usado por nenhuma tela real desde a Onda 10) também foi
+  removido — a tela de Providers reusa `RateLimitEntry`/`fetchRateLimits`
+  de `api/ratelimit.ts` (Onda 10) direto, sem duplicar o tipo. Isso fecha a
+  promessa registrada na Onda 10: "`providers.ts`'s `RATE_LIMITS` fabricado
+  ... aposentá-lo é trabalho explícito da Onda 12".
+- **[decisão] Tela reescrita como read-only, 2 cards** — "Gateway LLM ·
+  providers configurados" (novo, real) e "Rate limiting tier-gated"
+  (reaproveita `fetchRateLimits` da Onda 10 sem mudança). Nenhum toggle,
+  botão de reordenar ou editor de teto — o achado acima (degrau
+  descartado) já eliminava a necessidade de qualquer affordance de escrita.
+- **[decisão] Teste `providers_reflete_env_vars_reais` isola env vars via
+  `std::env::set_var`/`remove_var` dentro do próprio `#[tokio::test]`** —
+  mesmo padrão já usado por `FORGE_SCRIPTED` em `web_agent.rs`/
+  `squad_agent.rs`. Confirmado por grep que nenhum outro teste do crate lê
+  `ANTHROPIC_API_KEY`/`DEEPSEEK_API_KEY`/`OPENAI_API_KEY`, então não há
+  disputa com outro teste rodando em paralelo no mesmo binário; reforçado
+  rodando o teste 3× seguidas sem flake antes de considerar fechado.
+  `scripts/run-integration-server.mjs` aplica o mesmo isolamento no
+  processo filho do `forge dashboard` real (só `ANTHROPIC_API_KEY` setada,
+  as outras 2 removidas do env herdado) — a fronteira do Playwright prova
+  exatamente 1 "configurado" e 2 "sem key", nunca os 3, o que aconteceria
+  se a tela fabricasse o status em vez de ler o real.
+- **[armadilha evitada] `page.locator('span.mono')` no Playwright bateria em
+  5 elementos, não 3** — a legenda do rodapé ("`forge run`"/"`chat`")
+  também usa `.mono` para destaque tipográfico, sem relação com os ids de
+  provider. Resolvido com `.nth(0)`/`.nth(1)`/`.nth(2)` (ordem do DOM: os 3
+  providers vêm antes da legenda), não com um seletor mais específico —
+  mesma classe de armadilha já registrada para `getByText('read-only')` na
+  Onda 10.

@@ -116,6 +116,7 @@ pub fn router(
         .route("/api/models/usage", get(model_usage))
         .route("/api/experiment/{nome}", get(get_experiment))
         .route("/api/ratelimit", get(rate_limits))
+        .route("/api/providers", get(list_providers))
         .route("/api/verify/run", post(run_verify_start))
         .route("/api/verify/{id}", get(get_verify_status))
         .fallback_service(serve_dir)
@@ -306,6 +307,42 @@ async fn rate_limits() -> impl IntoResponse {
         })
         .collect();
     Json(entries)
+}
+
+/// Ordem fixa de fallback que `forge_llm::gateway::Gateway::from_env` usa
+/// (Anthropic → DeepSeek → OpenAI) — não `forge_llm::FallbackChain`
+/// (`provider.rs`), que é código morto: `Gateway::generate` itera
+/// `self.providers` direto, nunca consulta `FallbackChain::next_after`
+/// (confirmado lendo o código antes de expor isto).
+const KNOWN_PROVIDERS: [&str; 3] = ["anthropic", "deepseek", "openai"];
+
+#[derive(Serialize)]
+struct ProviderView {
+    id: &'static str,
+    /// Se a env var da key está definida e não-vazia — a MESMA checagem que
+    /// `Gateway::from_env` faz para decidir se o provider entra na cadeia.
+    configured: bool,
+}
+
+/// `GET /api/providers` (Fase 7 Onda 12, piso) — quais providers uma sessão
+/// REAL (`forge run`/`chat`) conseguiria usar agora, lendo os mesmos env
+/// vars que `Gateway::from_env` lê. Zero dependência nova (`forge-llm` já
+/// é dependência do crate, via `model_tier`/`rate_limit`). Sem mutação: o
+/// degrau (reordenar fallback, ajustar teto do rate limiter) fica de fora
+/// desta onda — ver `pendencias.md` para o porquê (`FallbackChain` morto +
+/// o dashboard não compartilha processo com nenhuma sessão real, mesmo
+/// achado da Onda 10 sobre "uso ao vivo").
+async fn list_providers() -> impl IntoResponse {
+    let gateway = forge_llm::gateway::Gateway::from_env();
+    let available: std::collections::HashSet<String> = gateway.available().into_iter().collect();
+    let providers: Vec<ProviderView> = KNOWN_PROVIDERS
+        .into_iter()
+        .map(|id| ProviderView {
+            id,
+            configured: available.contains(id),
+        })
+        .collect();
+    Json(providers)
 }
 
 #[derive(Serialize)]
@@ -1650,5 +1687,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Fronteira da Onda 12 (piso): `configured` bate por igualdade com os
+    /// env vars reais que `Gateway::from_env` leria — não um valor
+    /// fabricado no cliente. Mesmo padrão já usado por `web_agent.rs`/
+    /// `squad_agent.rs` (`FORGE_SCRIPTED`) para mutar env var em teste —
+    /// nenhum outro código deste crate lê essas 3 chaves, então não há
+    /// disputa com outro teste rodando em paralelo no mesmo binário.
+    #[tokio::test]
+    async fn providers_reflete_env_vars_reais() {
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key-onda-12");
+
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            ledger_vazio(),
+            web_dir.path(),
+            web_dir.path(),
+        );
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/providers")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let arr: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(arr.len(), 3);
+        let anthropic = arr.iter().find(|p| p["id"] == "anthropic").unwrap();
+        assert_eq!(anthropic["configured"], true);
+        let deepseek = arr.iter().find(|p| p["id"] == "deepseek").unwrap();
+        assert_eq!(deepseek["configured"], false);
+        let openai = arr.iter().find(|p| p["id"] == "openai").unwrap();
+        assert_eq!(openai["configured"], false);
+
+        std::env::remove_var("ANTHROPIC_API_KEY");
     }
 }

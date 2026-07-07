@@ -70,16 +70,12 @@ export interface ReviewerScore {
   detail: string
 }
 
+/** Espelha a resposta de `GET /api/providers` (Fase 7 Onda 12, piso) —
+ * `configured` é real (lido do mesmo env var que `Gateway::from_env` lê),
+ * não um status fabricado como "ativo"/"standby". */
 export interface ProviderInfo {
   id: string
-  name: string
-  status: 'ativo' | 'standby'
-}
-
-export interface RateLimitTier {
-  tier: ModelTierId
-  used: number
-  cap: number
+  configured: boolean
 }
 
 export interface SkillEntry {
