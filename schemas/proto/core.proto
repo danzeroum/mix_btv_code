@@ -24,12 +24,18 @@ service CoreService {
 message ToolCall {
   string tool = 1;
   string args_json = 2;
+  // Informativo — o lado Rust SEMPRE recalcula o escopo real a partir de
+  // args_json (Tool::scope) para a decisão de permissão; este campo nunca
+  // é a fonte de verdade para Allow/Ask/Deny.
   string scope = 3;
 }
 
 message ToolResult {
   string content = 1;
   bool truncated = 2;
+  // 0 = sucesso; 1 = erro de execução/args inválidos/ferramenta desconhecida
+  // (nunca chegou a rodar, ou rodou e falhou); -1 = negado pelo motor de
+  // permissões ou por um humano (nunca chegou a executar).
   int32 exit_code = 3;
 }
 

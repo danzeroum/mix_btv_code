@@ -32,7 +32,7 @@ import grpc
 
 from forge_proto import squad_pb2, squad_pb2_grpc
 
-from forge_squad.grpc_clients import GrpcGatewayClient, GrpcPermissionClient
+from forge_squad.grpc_clients import GrpcGatewayClient, GrpcPermissionClient, GrpcToolClient
 from forge_squad.memory import AgentMemorySystem
 from forge_squad.orchestrator import UnifiedOrchestrator
 
@@ -160,9 +160,14 @@ class SquadServicer(squad_pb2_grpc.SquadServiceServicer):
         )
         gateway = GrpcGatewayClient(channel)
         permission = GrpcPermissionClient(channel)
+        tool_client = GrpcToolClient(channel)
         memory = AgentMemorySystem(storage_dir=self.memory_dir) if self.memory_dir else AgentMemorySystem()
         orchestrator = UnifiedOrchestrator(
-            gateway, permission_client=permission, model=self.model, memory=memory
+            gateway,
+            permission_client=permission,
+            model=self.model,
+            memory=memory,
+            tool_client=tool_client,
         )
 
         async def run() -> None:

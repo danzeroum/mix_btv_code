@@ -19,6 +19,21 @@ Fase 5 Onda 3: `validate_results` passa a receber a evidência real do
 disparar a tarefa. `check_security`/`check_quality` continuam (baratos,
 complementares); a evidência do `/verify` é entrada adicional para o
 gateway, nunca decisão automática — o veredito ainda vem do modelo.
+
+Onda 3 ("tool execution architecture"): com `RunTool`/o loop ReAct do
+developer ativos, `execution_results` passa a carregar `tool_calls` reais
+por passo. `_claims_completion_without_write_evidence` é um gate duro
+(mesma filosofia de `forge_review/gates.py::evaluate` — regra dura
+sobrepõe a média do LLM): um developer "completed" sem nenhum tool_call
+mutante (`edit`/`bash`) bem-sucedido no transcript é reprovado ANTES do
+gateway ser chamado, independente do que o modelo diria. Limitação
+honesta: o gate prova "uma chamada mutante rodou sem erro", não "o
+arquivo X existe com o conteúdo Y" — heredoc de `bash` não devolve nada
+estruturado no stdout; fica deliberadamente grosseiro para não depender
+de parsing frágil de texto. É complementar à proibição textual dos dois
+prompts abaixo (Onda 0), não substitui: o prompt reduz a chance de uma
+alegação falsa chegar ao payload; o gate faz uma alegação falsa não
+conseguir produzir `approved: true`/`passed: true` de jeito nenhum.
 """
 
 from __future__ import annotations
@@ -63,6 +78,43 @@ _DANGEROUS_PATTERNS = [
     ("subprocess", "Process spawning risk"),
 ]
 
+#: Ferramentas que mutam o filesystem — a única evidência mecânica que o
+#: gate duro aceita como lastro para um "completed" do developer.
+_MUTATING_TOOLS = {"edit", "bash"}
+
+_GATE_ISSUE = (
+    "developer reportou 'completed' sem nenhuma chamada de ferramenta "
+    "mutante (edit/bash) bem-sucedida no transcript — gate duro, "
+    "reprovado antes do veredito do modelo"
+)
+
+
+def _claims_completion_without_write_evidence(results: list[dict[str, Any]]) -> bool:
+    """`True` quando algum resultado do developer alega `status: completed`
+    sem nenhum `tool_calls[].exit_code == 0` em `edit`/`bash` — a alegação
+    não tem lastro mecânico de escrita.
+
+    Só se aplica a resultados que passaram pelo loop ReAct (carregam a
+    chave `tool_calls` — mesmo vazia). Um resultado do caminho antigo de
+    chamada única (`_parse_result`, sem `tool_client` anexado — proposta/
+    avaliação em `_get_squad_proposals`, ou qualquer chamador que não
+    anexou `tool_client`) nunca teve infraestrutura de ferramenta
+    disponível; gatear "completed" ali seria punir a ausência de algo que
+    nunca poderia ter existido, não uma alegação vazia de verdade."""
+
+    for r in results:
+        if not isinstance(r, dict) or r.get("agent") != "developer" or r.get("status") != "completed":
+            continue
+        if "tool_calls" not in r:
+            continue
+        tool_calls = r.get("tool_calls") or []
+        if not any(
+            isinstance(tc, dict) and tc.get("tool") in _MUTATING_TOOLS and tc.get("exit_code") == 0
+            for tc in tool_calls
+        ):
+            return True
+    return False
+
 
 class AuditorAgent(BaseAgent):
     """Especialista em segurança e qualidade com veredito real via gateway."""
@@ -95,6 +147,10 @@ class AuditorAgent(BaseAgent):
             raise RuntimeError(
                 "AuditorAgent sem gateway anexado — chame attach_gateway() antes de execute()"
             )
+
+        prior_results = task.get("prior_results") or []
+        if _claims_completion_without_write_evidence(prior_results):
+            return {"issues": [], "warnings": [], "passed": False, "confidence": 0.0, "notes": _GATE_ISSUE, "additional_checks": []}
 
         issues = self.check_security(task.get("code", "")) if task.get("code") else []
         warnings = self.check_quality(task.get("metrics", {})) if task.get("metrics") else []
@@ -140,6 +196,9 @@ class AuditorAgent(BaseAgent):
             raise RuntimeError(
                 "AuditorAgent sem gateway anexado — chame attach_gateway() antes de execute()"
             )
+
+        if _claims_completion_without_write_evidence(results):
+            return {"approved": False, "confidence": 0.0, "issues": [_GATE_ISSUE], "agent_scores": {}}
 
         payload: dict[str, Any] = {"results": results}
         if evidence is not None:

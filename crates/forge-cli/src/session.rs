@@ -100,6 +100,30 @@ impl Session {
     }
 }
 
+fn append_entry_impl(
+    root: &Path,
+    actor: &str,
+    kind: &str,
+    payload: Value,
+    r#override: Option<OverrideMark>,
+) -> anyhow::Result<()> {
+    let dir = root.join(".forge");
+    std::fs::create_dir_all(&dir)?;
+    let mut store = LedgerStore::open(dir.join("forge.db").to_str().unwrap_or(".forge/forge.db"))?;
+    store.append(LedgerEntry {
+        seq: 0,
+        prev_hash: String::new(),
+        entry_hash: String::new(),
+        kind: kind.into(),
+        actor: actor.into(),
+        payload,
+        r#override,
+        fake_marker: None,
+        ts: now_rfc3339(),
+    })?;
+    Ok(())
+}
+
 /// Registra uma entrada avulsa no MESMO ledger (`.forge/forge.db`), fora do
 /// ciclo de vida de uma `Session` de tarefa — usado por mutações de
 /// configuração (matriz de permissão, Fase 7 Onda 2) que não têm
@@ -112,24 +136,26 @@ pub fn append_override_entry(
     kind: &str,
     payload: Value,
 ) -> anyhow::Result<()> {
-    let dir = root.join(".forge");
-    std::fs::create_dir_all(&dir)?;
-    let mut store = LedgerStore::open(dir.join("forge.db").to_str().unwrap_or(".forge/forge.db"))?;
-    store.append(LedgerEntry {
-        seq: 0,
-        prev_hash: String::new(),
-        entry_hash: String::new(),
-        kind: kind.into(),
-        actor: actor.into(),
+    append_entry_impl(
+        root,
+        actor,
+        kind,
         payload,
-        r#override: Some(OverrideMark {
+        Some(OverrideMark {
             marked: true,
             reason: None,
         }),
-        fake_marker: None,
-        ts: now_rfc3339(),
-    })?;
-    Ok(())
+    )
+}
+
+/// Registra uma entrada avulsa no MESMO ledger, fora do ciclo de vida de
+/// uma `Session` de tarefa e SEM marcação de override — usado pela
+/// execução de ferramenta via `RunTool` (squad como executor, "tool
+/// execution architecture"): o `CoreBackend::run_tool` roda numa task
+/// separada da `Session` que `squad.rs::try_squad` abre para a tarefa, sem
+/// acesso a ela.
+pub fn append_entry(root: &Path, actor: &str, kind: &str, payload: Value) -> anyhow::Result<()> {
+    append_entry_impl(root, actor, kind, payload, None)
 }
 
 #[cfg(test)]

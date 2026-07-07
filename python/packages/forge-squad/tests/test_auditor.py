@@ -188,6 +188,80 @@ def test_audit_sem_prior_results_nao_inclui_a_chave_no_payload():
     assert "prior_agent_results" not in sent_content
 
 
+def test_validate_results_reprova_completed_sem_tool_call_de_escrita_mesmo_com_llm_aprovando():
+    # Gate duro (Onda 3, "tool execution architecture"): "completed" sem
+    # nenhum tool_call de escrita bem-sucedida é reprovado ANTES do
+    # gateway ser sequer considerado — mesmo que o LLM roteirizado
+    # aprovaria se fosse chamado. Prova que o gate não depende do modelo.
+    payload = {"approved": True, "confidence": 0.9, "issues": [], "agent_scores": {}}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    results = [{"agent": "developer", "status": "completed", "final_output": "x", "tool_calls": []}]
+    validation = asyncio.run(agent.validate_results(results))
+
+    assert validation["approved"] is False
+    assert gateway.requests == []  # o gateway nunca foi chamado
+
+
+def test_audit_reprova_prior_results_sem_tool_call_de_escrita_mesmo_com_llm_aprovando():
+    payload = {"passed": True, "confidence": 0.9, "notes": "ok", "additional_checks": []}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    prior = [{"agent": "developer", "status": "completed", "final_output": "x", "tool_calls": []}]
+    assessment = asyncio.run(agent.audit({"description": "validar arquivo gerado", "prior_results": prior}))
+
+    assert assessment["passed"] is False
+    assert gateway.requests == []
+
+
+def test_validate_results_nao_reprova_completed_sem_chave_tool_calls_caminho_antigo():
+    # Achado real ao rodar a suíte após adicionar o gate: um resultado do
+    # caminho de chamada única (`_parse_result`, sem `tool_client`
+    # anexado — nunca teve infraestrutura de ferramenta disponível) não
+    # carrega a chave `tool_calls` nenhuma. Gatear esse caso puniria a
+    # ausência de algo que nunca poderia ter existido — o gate só se
+    # aplica a resultados que passaram pelo loop ReAct (chave presente,
+    # mesmo vazia). Sem esta distinção, este teste (e o "sem RunTool
+    # ainda" mais amplo) regride.
+    payload = {"approved": True, "confidence": 0.9, "issues": [], "agent_scores": {}}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    results = [{"agent": "developer", "status": "completed", "final_output": "x"}]  # sem "tool_calls"
+    validation = asyncio.run(agent.validate_results(results))
+
+    assert validation["approved"] is True
+    assert len(gateway.requests) == 1
+
+
+def test_validate_results_nao_reprova_completed_com_tool_call_de_escrita_bem_sucedida():
+    # Contraprova: o gate não é um martelo cego contra "completed" — uma
+    # chamada mutante real e bem-sucedida no transcript deixa o veredito
+    # a cargo do modelo normalmente.
+    payload = {"approved": True, "confidence": 0.9, "issues": [], "agent_scores": {}}
+    gateway = ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))])
+    agent = AuditorAgent()
+    agent.attach_gateway(gateway)
+
+    results = [
+        {
+            "agent": "developer",
+            "status": "completed",
+            "final_output": "x",
+            "tool_calls": [{"tool": "bash", "exit_code": 0, "content": "sha256: abc123"}],
+        }
+    ]
+    validation = asyncio.run(agent.validate_results(results))
+
+    assert validation["approved"] is True
+    assert len(gateway.requests) == 1
+
+
 def test_resposta_sem_json_cai_no_fallback_honesto_nao_aprovado():
     agent = AuditorAgent()
     agent.attach_gateway(ScriptedGatewayClient([LlmResponse(text="não consigo avaliar isso.")]))

@@ -610,5 +610,15 @@ mod tests {
         async fn request_permission(&self, _req: &forge_proto::core::PermissionRequest) -> bool {
             true
         }
+        async fn run_tool(
+            &self,
+            _call: &forge_proto::core::ToolCall,
+        ) -> forge_proto::core::ToolResult {
+            forge_proto::core::ToolResult {
+                content: "NoopCore não executa ferramentas".into(),
+                truncated: false,
+                exit_code: 1,
+            }
+        }
     }
 }

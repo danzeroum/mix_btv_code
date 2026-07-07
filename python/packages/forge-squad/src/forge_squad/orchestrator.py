@@ -24,6 +24,7 @@ Adaptações registradas nos ADRs, aplicadas neste porte:
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -41,6 +42,7 @@ from forge_squad.permission import PermissionClient
 from forge_squad.planning import AdaptivePlanner
 from forge_squad.routing import LearningRouter
 from forge_squad.sandbox import SecureToolSandbox
+from forge_squad.tool_client import ToolClient
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,7 @@ class UnifiedOrchestrator:
         permission_client: Optional[PermissionClient] = None,
         model: str = "claude-sonnet-5",
         memory: Optional[AgentMemorySystem] = None,
+        tool_client: Optional[ToolClient] = None,
     ) -> None:
         self.planner = AdaptivePlanner(model=model)
         self.planner.attach_gateway(gateway)
@@ -115,6 +118,11 @@ class UnifiedOrchestrator:
         for agent in self.agents.values():
             agent.attach_memory(self.memory)
             agent.attach_gateway(gateway)
+        # Só o developer executa ferramentas hoje ("tool execution
+        # architecture", Onda 1/2) — não é um `attach_*` genérico em loop
+        # como memory/gateway porque nenhum outro agente tem esse método.
+        if tool_client is not None:
+            self.agents["developer"].attach_tool_client(tool_client)
 
     async def _emit(self, event: dict[str, Any]) -> None:
         if self._event_sink is not None:
@@ -195,6 +203,28 @@ class UnifiedOrchestrator:
                 execution_results, evidence=task.get("verification_evidence")
             )
         overall_success = bool(final_validation.get("approved", False))
+
+        # Onda 3 ("tool execution architecture"): sem isto, o veredito final
+        # (calculado sobre evidência real de tool_calls) não era observável
+        # em nenhum lugar fora do dict de retorno que `server.py` descarta
+        # (`run()`, ExecuteTask) — inobservável mesmo depois de RunTool/loop
+        # ReAct existirem. Reusa StepResult (`kind: "step"`), zero mudança
+        # de proto; `step_id` fixo distingue este evento de um passo real.
+        await self._emit(
+            {
+                "kind": "step",
+                "step_id": "final_validation",
+                "success": overall_success,
+                "summary": json.dumps(
+                    {
+                        "approved": overall_success,
+                        "confidence": final_validation.get("confidence"),
+                        "issues": final_validation.get("issues", []),
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        )
 
         # ADR 0006: o portão não registra mais; quem executa registra o
         # resultado REAL da execução (a menos que já tenha sido rejeitado
@@ -286,7 +316,7 @@ class UnifiedOrchestrator:
                 {"kind": "handoff", "phase": "start", "from_agent": "orchestrator", "to_agent": agent_name}
             )
             if self._can_parallelize(step, plan):
-                parallel_tasks = self._extract_parallel_tasks(step)
+                parallel_tasks = self._extract_parallel_tasks(step, results)
                 step_results = await self.parallel.execute_parallel_with_limits(parallel_tasks)
                 for result in step_results:
                     await self.evaluator.evaluate_agent_performance(agent_name, result)
@@ -336,14 +366,35 @@ class UnifiedOrchestrator:
             return False
         return True
 
-    def _extract_parallel_tasks(self, step: dict[str, Any]):
+    def _extract_parallel_tasks(self, step: dict[str, Any], results: list[dict[str, Any]]):
         description = step.get("description", "")
+        # Mesma forma do `step_task` sequencial (:248-257) — sem isto, um
+        # passo "implement" sem `dependencies` (o caso comum: cai aqui, não
+        # no ramo sequencial) chegava ao developer sem "action", e o sinal
+        # de ativação do loop ReAct (`DeveloperAgent.execute`) nunca
+        # disparava. Achado real: era exatamente o caminho que reproduzia o
+        # bug original (squad não materializa arquivo) mesmo depois do
+        # RunTool/loop ReAct existirem.
+        action = step.get("action", "")
+        prior_results = list(results)
 
         async def developer_task() -> dict[str, Any]:
-            return await self.agents["developer"].execute({"description": f"Parallel dev: {description}"})
+            return await self.agents["developer"].execute(
+                {
+                    "description": f"Parallel dev: {description}",
+                    "action": action,
+                    "prior_results": prior_results,
+                }
+            )
 
         async def designer_task() -> dict[str, Any]:
-            return await self.agents["designer"].execute({"description": f"Parallel design: {description}"})
+            return await self.agents["designer"].execute(
+                {
+                    "description": f"Parallel design: {description}",
+                    "action": action,
+                    "prior_results": prior_results,
+                }
+            )
 
         return [developer_task, designer_task]
 

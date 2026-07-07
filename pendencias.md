@@ -1341,72 +1341,24 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   pelo parecer (e que endosso): `forge squad "crie X.html..."` produzindo
   `X.html` real no workspace, registrado no ledger, com o auditor julgando
   sobre um artefato que existe — não sobre uma alegação de texto.
-
----
-
-# BuildToValue — incorporação dos repos irmãos (jul/2026, autônomo)
-
-> Contexto: renomeação Forge→BuildToValue + roadmap em 4 fases derivado da
-> análise de 11 repositórios irmãos. Handoff completo em
-> `docs/handoff/desenvolvimento/HANDOFF-BUILDTOVALUE.md`. Este bloco registra
-> as DÚVIDAS e decisões que precisam de revisão humana.
-
-## Fase 1 — usuário como membro da squad
-
-- **[entregue · Fase 1a] Chat visível + canal de entrada.** `ChatMessage` no
-  `squad.proto` (tag 9, aditivo); `POST /api/squad/:id/message` injeta a fala do
-  usuário (ecoada como `ChatMessage` HUMAN + enfileirada na `inbox`); o
-  orquestrador dá voz aos agentes (`_emit_chat`, narração derivada do conteúdo
-  REAL da proposta, nada fabricado) e narra o consenso; UI de conversa na tela
-  Squad. Testes: Rust (`push_user_message_*`), Python (`test_chat_message_*`,
-  `test_event_sink_*`), web (tsc/lint/vitest verdes).
-
-- **[DÚVIDA — decisão do dono · Fase 1b] O usuário influencia o run de verdade?**
-  Hoje (1a) a fala do usuário é visível e enfileirada, mas o orquestrador é um
-  pipeline determinístico (plano→propostas→consenso→passos) e **ainda não
-  consome** a `inbox` no meio da execução. Para o usuário virar membro PLENO
-  (a fala vira `Proposal` de peso máximo dentro do consenso), é preciso:
-  (a) RPC novo `CoreService.AwaitUserTurn` (`core.proto`), (b) método no trait
-  `CoreBackend` (`forge-sidecar/core_server.rs`) com default no-op p/ não quebrar
-  os backends existentes, (c) `WebSquadCoreBackend.await_user_turn` puxando de
-  `SquadHub.take_user_message`, (d) `UserAgent` + ponto de consulta no
-  `_get_squad_proposals`. É mais invasivo (mexe no contrato gRPC Core) — deixei
-  como **PR 2 separada** por segurança. **Confirmar se quer 1b agora** ou se 1a
-  (chat + gate) já atende "não só aprovador".
-
-## Fase 3/4 — decisão estratégica pendente
-
-- **[DÚVIDA — decisão do dono] Autonomia progressiva L1–L5.** A análise recomenda
-  MANTER descopada (ADR 0021): o próprio SquadIAds não usa o loop dele, e a UX
-  "humano é membro contínuo" torna a auto-promoção redundante. Mas era um dos 4
-  diferenciais do BuildToValue original. Implementei/implementarei autonomia como
-  **rótulo descritivo** (metadado consultável em `persona.v1`), NÃO como loop
-  automático. Se quiser readotar um dial Manual/Assistido/Autônomo de verdade, é
-  um **ADR novo explícito** que supersede o 0021 — não farei em silêncio.
-
-- **[nota] Descopes herdados que sigo respeitando:** `max_autonomy_level` continua
-  ignorado ponta-a-ponta (ADR 0021); `forge_squad/forgetting.py` segue código
-  morto. Não vou "ligar o campo" sem efeito real.
-
-## Fase 3 — confiança e governança (parcial)
-
-- **[entregue] Kill-switch de squad (Prioridade-Zero).** `POST /api/squad/:id/
-  emergency-stop` para um squad em execução: aborta a task que drena o stream,
-  destrava gate HITL pendente (nega, fail-closed), publica evento de erro
-  visível, encerra o SSE. Checagem `is_stopped` no loop como saída limpa. Botão
-  "interromper" na tela Squad. Testes Rust (`emergency_stop_*`).
-- **[pendente — maior/mais sensível, precisa de revisão antes de autonomia
-  profunda] Restante da Fase 3:** HMAC por entrada no ledger (mexe em
-  `forge-store/ledger.rs`, código sensível — paridade de hash/append-only);
-  gates 4-estados + piso-crítico-irredutível + impacto regulatório (estende
-  `gates.evaluate`/`forge-verify`); separação produzir≠revisar≠aprovar
-  (motor de permissões); versionamento/expiração de template; Prompt Integrity
-  validator. Recomendo revisar as fases já mergeadas (1, 2a) e o kill-switch
-  antes de eu avançar nas mudanças de ledger/permissões — são o núcleo de
-  segurança e merecem seu aval.
-
-## Fase 4 — endurecimento (não iniciada)
-Espinha operacional (dep-graph/health/logging), consenso ponderado por
-confiança, Decisão→ADR, histerese, gate Spec-First, placar what-matters,
-roteamento por problema, modo local. Fica para depois do aval das fases de
-governança.
+- **[resolvido] Onda 1 (RunTool) + Onda 2 (loop ReAct) + Onda 3 (evidência
+  real ao auditor) fechadas — ADR 0023.** `RunTool` ativado no Rust
+  (`core_run_tool`, os três `CoreBackend` de produção); `DeveloperAgent.
+  _implement_with_tools` é o loop ReAct real; o gate duro em
+  `auditor.py` reprova "completed" sem evidência de escrita ANTES do
+  gateway ser chamado. Dois achados reais durante a implementação, não
+  previstos no parecer original: (1) o caminho paralelo do orquestrador
+  (`_extract_parallel_tasks`, disparado por qualquer passo "implement"
+  sem `dependencies` — o caso comum) chamava o developer sem `"action"`,
+  então o sinal de ativação do loop ReAct nunca disparava ali — corrigido
+  antes de virar uma regressão silenciosa; (2) `core_generate` só tratava
+  o papel `"system"`, colapsando `"assistant"` em `Role::User` — o loop
+  ReAct é o primeiro caller a mandar histórico multi-turno de verdade e
+  teria esbarrado nisso contra um provider real. Definição de pronto
+  provada ponta a ponta com processo Python real, sem key
+  (`crates/forge-sidecar/tests/squad_e2e.rs::
+  squad_cria_arquivo_real_via_run_tool_ledger_e_auditor_veem_evidencia`):
+  o arquivo existe no workspace, o ledger tem `squad.tool_run`, e o
+  `StepResult{step_id:"final_validation"}` aprovado é observável fora do
+  retorno Python que `server.py` descartava. Detalhes completos e o
+  raciocínio de cada decisão em `docs/adr/0023-runtool-ativado-squad-como-executor.md`.
