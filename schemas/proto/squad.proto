@@ -35,7 +35,19 @@ message SquadEvent {
     HitlEscalation hitl = 6;
     StepResult step = 7;
     string error = 8;
+    ChatMessage chat = 9;
   }
+}
+
+// Mensagem de conversa do squad ao vivo — renderizada como chat ao lado da
+// esteira. `author_role` ("AGENT"|"HUMAN"|"SYSTEM") distingue um membro-agente
+// do membro-humano; `author` é o nome de exibição (papel). Aditivo à Fase 7:
+// dá voz aos agentes e ao usuário como MEMBRO da squad, não só aprovador.
+message ChatMessage {
+  string author = 1;
+  string author_role = 2;
+  string text = 3;
+  string in_reply_to = 4;
 }
 
 message Proposal {

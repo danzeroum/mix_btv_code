@@ -337,6 +337,7 @@ fn render_event(ev: &forge_proto::squad::SquadEvent, session: &mut Session) {
             );
         }
         Some(squad_event::Payload::Error(e)) => eprintln!("  ✗ erro do squad: {e}"),
+        Some(squad_event::Payload::Chat(c)) => eprintln!("  💬 {}: {}", c.author, c.text),
         None => {}
     }
 }

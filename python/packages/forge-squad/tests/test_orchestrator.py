@@ -124,11 +124,18 @@ def test_event_sink_emite_eventos_ao_vivo_na_ordem(tmp_path):
     asyncio.run(orch.execute_complex_task({"description": "tarefa"}, event_sink=sink))
 
     kinds = [e["kind"] for e in events]
-    # 3 propostas antes do consenso; consenso antes dos handoffs/steps.
-    assert kinds[:3] == ["proposal", "proposal", "proposal"]
-    assert "consensus" in kinds
-    assert kinds.index("consensus") < kinds.index("handoff")
-    assert kinds.index("handoff") < kinds.index("step")
+    # Fase 1: a squad "fala" (chat) intercalado com o pipeline. A espinha
+    # estrutural (propostas → consenso → handoff → step) ignora os chats.
+    structural = [k for k in kinds if k != "chat"]
+    assert structural[:3] == ["proposal", "proposal", "proposal"]
+    assert "consensus" in structural
+    assert structural.index("consensus") < structural.index("handoff")
+    assert structural.index("handoff") < structural.index("step")
+    # Os agentes ganham voz: há eventos de chat na conversa.
+    assert "chat" in kinds
+    chat_ev = next(e for e in events if e["kind"] == "chat")
+    assert chat_ev["author_role"] in ("AGENT", "SYSTEM", "HUMAN")
+    assert chat_ev["text"]
     consensus_ev = next(e for e in events if e["kind"] == "consensus")
     assert consensus_ev["requires_human"] is False
 

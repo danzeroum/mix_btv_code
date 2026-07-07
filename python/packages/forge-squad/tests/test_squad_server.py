@@ -122,6 +122,18 @@ def test_stream_de_eventos_com_consenso_forte(tmp_path):
     assert {p.agent for p in proposals} == {"architect", "developer", "auditor"}
 
 
+def test_chat_message_atravessa_o_mapeamento_proto(tmp_path):
+    # Fase 1: os agentes ganham voz. Os eventos "chat" viram ChatMessage no
+    # proto, com author/author_role/text preenchidos (não default-zero).
+    events, _core = asyncio.run(_run_scenario(tmp_path, 0.9, 0.2, 0.2, approved=True, permission_allow=True))
+    chats = [ev.chat for ev in events if ev.WhichOneof("payload") == "chat"]
+    assert chats, "esperava ao menos um ChatMessage no stream"
+    assert all(c.text for c in chats)
+    assert all(c.author_role in ("AGENT", "HUMAN", "SYSTEM") for c in chats)
+    # há narração dos agentes (AGENT) e do próprio squad no consenso (SYSTEM).
+    assert {c.author_role for c in chats} >= {"AGENT", "SYSTEM"}
+
+
 def test_requires_human_true_sobrevive_ao_mapeamento_proto(tmp_path):
     # Consenso fraco → requires_human True. Se o mapeamento pydantic→proto
     # não setasse o campo à mão, o default-zero do proto3 devolveria False.

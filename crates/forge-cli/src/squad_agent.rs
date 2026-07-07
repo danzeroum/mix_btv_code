@@ -27,10 +27,10 @@ use axum::{Json, Router};
 use forge_llm::gateway::Generator;
 use forge_proto::core::PermissionRequest;
 use forge_proto::llm::{LlmRequest, Usage};
-use forge_proto::squad::{squad_event, SquadEvent, SquadTask};
+use forge_proto::squad::{squad_event, ChatMessage, SquadEvent, SquadTask};
 use forge_sidecar::{serve_core, CoreBackend, SidecarError, SquadPool};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -55,6 +55,11 @@ struct SquadTaskState {
     /// via e2e (`run_squad_via_http_com_gate_hitl_real_e_ledger`).
     tx: Option<tokio::sync::broadcast::Sender<SquadEvent>>,
     pending: Option<PendingHitl>,
+    /// Mensagens do usuário ainda não consumidas por um ponto de consulta do
+    /// orquestrador. Na Fase 1a servem de trilha visível (ecoadas como
+    /// `ChatMessage`); a Fase 1b (`AwaitUserTurn`) as puxa como turno real do
+    /// membro humano dentro do orquestrador.
+    inbox: VecDeque<String>,
 }
 
 impl SquadTaskState {
@@ -64,7 +69,23 @@ impl SquadTaskState {
             log: Vec::new(),
             tx: Some(tx),
             pending: None,
+            inbox: VecDeque::new(),
         }
+    }
+}
+
+/// Monta um `SquadEvent` de chat (variante `ChatMessage` do proto) — usado
+/// para ecoar a fala do usuário e as falas narradas dos agentes na conversa.
+fn chat_event(task_id: &str, author: &str, author_role: &str, text: String) -> SquadEvent {
+    SquadEvent {
+        task_id: task_id.to_string(),
+        ts: now_rfc3339(),
+        payload: Some(squad_event::Payload::Chat(ChatMessage {
+            author: author.to_string(),
+            author_role: author_role.to_string(),
+            text,
+            in_reply_to: String::new(),
+        })),
     }
 }
 
@@ -171,6 +192,33 @@ impl SquadHub {
         };
         let _ = pending.responder.send(allow);
         Ok(())
+    }
+
+    /// Registra uma mensagem do usuário na tarefa (o humano como MEMBRO da
+    /// squad). Enfileira na `inbox` (para a Fase 1b puxar como turno real) e
+    /// ecoa a fala como `ChatMessage` no stream, para todos os assinantes
+    /// verem — mesma UX de qualquer outro membro. `Err` se a tarefa não
+    /// existe (ex.: id inválido ou já drenada e removida).
+    pub fn push_user_message(&self, task_id: &str, text: String) -> Result<(), ()> {
+        {
+            let mut tasks = self.tasks.lock().expect("squad hub mutex poisoned");
+            let Some(state) = tasks.get_mut(task_id) else {
+                return Err(());
+            };
+            state.inbox.push_back(text.clone());
+        }
+        // `publish` já grava no log + faz broadcast; fora do lock acima para
+        // não reentrar no mutex.
+        self.publish(task_id, chat_event(task_id, "Você", "HUMAN", text));
+        Ok(())
+    }
+
+    /// Retira a próxima mensagem do usuário pendente, se houver (consumida
+    /// pelo ponto de consulta do orquestrador na Fase 1b). Não bloqueia.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn take_user_message(&self, task_id: &str) -> Option<String> {
+        let mut tasks = self.tasks.lock().expect("squad hub mutex poisoned");
+        tasks.get_mut(task_id).and_then(|s| s.inbox.pop_front())
     }
 }
 
@@ -513,6 +561,41 @@ async fn resolve_hitl_handler(
     }
 }
 
+#[derive(Deserialize)]
+struct PostMessageBody {
+    text: String,
+}
+
+/// O usuário como MEMBRO da squad: injeta uma mensagem na tarefa viva. A fala
+/// é ecoada no stream (todos veem) e enfileirada para o orquestrador. Responde
+/// `202 Accepted` **sem corpo** — o cliente não deve chamar `.json()` (mesmo
+/// cuidado do bug de `202` corrigido na Onda 15).
+async fn post_message_handler(
+    State(state): State<SquadAgentState>,
+    Path(task_id): Path<String>,
+    Json(body): Json<PostMessageBody>,
+) -> Response {
+    let text = body.text.trim().to_string();
+    if text.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorBody::new("empty_message", "mensagem vazia")),
+        )
+            .into_response();
+    }
+    match state.hub.push_user_message(&task_id, text) {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
+        Err(()) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody::new(
+                "task_not_found",
+                "tarefa de squad inexistente ou já encerrada",
+            )),
+        )
+            .into_response(),
+    }
+}
+
 /// Router aditivo do squad ao vivo — `.merge()`ado ao router do agente web
 /// (mesma composição de `web_agent::merged_router`, mesma guarda de
 /// `Origin`/`Host`).
@@ -521,6 +604,7 @@ pub fn router(hub: SquadHub, pool: Arc<SquadPool>) -> Router {
         .route("/api/squad/run", post(run_squad_handler))
         .route("/api/squad/{task_id}/events", get(squad_sse_handler))
         .route("/api/squad/{task_id}/hitl", post(resolve_hitl_handler))
+        .route("/api/squad/{task_id}/message", post(post_message_handler))
         .with_state(SquadAgentState { hub, pool })
 }
 
@@ -621,6 +705,36 @@ mod tests {
         let hub = SquadHub::new(Duration::from_millis(50));
         let _ = hub.subscribe("t1");
         assert!(!hub.request_hitl("t1").await);
+    }
+
+    #[test]
+    fn push_user_message_ecoa_chat_no_stream_e_enfileira() {
+        let hub = SquadHub::new(Duration::from_millis(100));
+        let _ = hub.subscribe("t1");
+        assert!(hub
+            .push_user_message("t1", "priorize o tom formal".into())
+            .is_ok());
+        // A mensagem foi ecoada como ChatMessage(HUMAN) no snapshot...
+        let (snapshot, _rx) = hub.subscribe("t1");
+        let chat = snapshot.iter().find_map(|e| match &e.payload {
+            Some(squad_event::Payload::Chat(c)) => Some(c),
+            _ => None,
+        });
+        let chat = chat.expect("esperava um ChatMessage no stream");
+        assert_eq!(chat.author_role, "HUMAN");
+        assert_eq!(chat.text, "priorize o tom formal");
+        // ...e ficou enfileirada para o ponto de consulta do orquestrador.
+        assert_eq!(
+            hub.take_user_message("t1").as_deref(),
+            Some("priorize o tom formal")
+        );
+        assert!(hub.take_user_message("t1").is_none());
+    }
+
+    #[test]
+    fn push_user_message_em_tarefa_inexistente_devolve_err() {
+        let hub = SquadHub::new(Duration::from_millis(100));
+        assert!(hub.push_user_message("nao-existe", "oi".into()).is_err());
     }
 
     #[tokio::test]

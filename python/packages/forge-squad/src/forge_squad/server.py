@@ -86,6 +86,15 @@ def _to_squad_event(task_id: str, event: dict[str, Any]) -> squad_pb2.SquadEvent
                 step_id=event["step_id"], success=bool(event["success"]), summary=event["summary"]
             )
         )
+    elif kind == "chat":
+        ev.chat.CopyFrom(
+            squad_pb2.ChatMessage(
+                author=event["author"],
+                author_role=event["author_role"],
+                text=event["text"],
+                in_reply_to=event.get("in_reply_to", ""),
+            )
+        )
     elif kind == "error":
         ev.error = event["message"]
     else:  # pragma: no cover - guarda defensiva

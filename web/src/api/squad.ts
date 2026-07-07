@@ -9,7 +9,7 @@
  * `Handoff`/`Hitl`/`Step`/`Error`), não um envelope autoral como o de
  * `stream.ts` (sessão).
  */
-import { fetchJson } from './client'
+import { ApiError, fetchJson } from './client'
 
 export interface SquadProposal {
   agent: string
@@ -47,6 +47,15 @@ export interface SquadStep {
   summary: string
 }
 
+/** Mensagem de conversa do squad ao vivo (proto `ChatMessage`). `author_role`
+ * distingue o membro-agente do membro-humano. */
+export interface SquadChatMessage {
+  author: string
+  author_role: 'AGENT' | 'HUMAN' | 'SYSTEM'
+  text: string
+  in_reply_to?: string
+}
+
 export type SquadEventPayload =
   | { Proposal: SquadProposal }
   | { Consensus: SquadConsensus }
@@ -54,6 +63,7 @@ export type SquadEventPayload =
   | { Hitl: SquadHitl }
   | { Step: SquadStep }
   | { Error: string }
+  | { Chat: SquadChatMessage }
 
 export interface SquadEventEnvelope {
   task_id: string
@@ -79,6 +89,20 @@ export async function resolveHitl(taskId: string, allow: boolean): Promise<void>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ allow }),
   })
+}
+
+/** Envia uma mensagem do usuário à squad viva — o humano como MEMBRO, não só
+ * aprovador. Responde `202 Accepted` sem corpo, então NÃO usamos `fetchJson`
+ * (que tentaria `.json()` num corpo vazio — bug corrigido na Onda 15). */
+export async function postSquadMessage(taskId: string, text: string): Promise<void> {
+  const response = await fetch(`/api/squad/${encodeURIComponent(taskId)}/message`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  if (!response.ok) {
+    throw new ApiError(`falha ao enviar mensagem (${response.status})`, `http_${response.status}`)
+  }
 }
 
 export interface SquadEventHandlers {

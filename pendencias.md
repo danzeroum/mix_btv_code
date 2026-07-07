@@ -1341,3 +1341,49 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   pelo parecer (e que endosso): `forge squad "crie X.html..."` produzindo
   `X.html` real no workspace, registrado no ledger, com o auditor julgando
   sobre um artefato que existe — não sobre uma alegação de texto.
+
+---
+
+# BuildToValue — incorporação dos repos irmãos (jul/2026, autônomo)
+
+> Contexto: renomeação Forge→BuildToValue + roadmap em 4 fases derivado da
+> análise de 11 repositórios irmãos. Handoff completo em
+> `docs/handoff/desenvolvimento/HANDOFF-BUILDTOVALUE.md`. Este bloco registra
+> as DÚVIDAS e decisões que precisam de revisão humana.
+
+## Fase 1 — usuário como membro da squad
+
+- **[entregue · Fase 1a] Chat visível + canal de entrada.** `ChatMessage` no
+  `squad.proto` (tag 9, aditivo); `POST /api/squad/:id/message` injeta a fala do
+  usuário (ecoada como `ChatMessage` HUMAN + enfileirada na `inbox`); o
+  orquestrador dá voz aos agentes (`_emit_chat`, narração derivada do conteúdo
+  REAL da proposta, nada fabricado) e narra o consenso; UI de conversa na tela
+  Squad. Testes: Rust (`push_user_message_*`), Python (`test_chat_message_*`,
+  `test_event_sink_*`), web (tsc/lint/vitest verdes).
+
+- **[DÚVIDA — decisão do dono · Fase 1b] O usuário influencia o run de verdade?**
+  Hoje (1a) a fala do usuário é visível e enfileirada, mas o orquestrador é um
+  pipeline determinístico (plano→propostas→consenso→passos) e **ainda não
+  consome** a `inbox` no meio da execução. Para o usuário virar membro PLENO
+  (a fala vira `Proposal` de peso máximo dentro do consenso), é preciso:
+  (a) RPC novo `CoreService.AwaitUserTurn` (`core.proto`), (b) método no trait
+  `CoreBackend` (`forge-sidecar/core_server.rs`) com default no-op p/ não quebrar
+  os backends existentes, (c) `WebSquadCoreBackend.await_user_turn` puxando de
+  `SquadHub.take_user_message`, (d) `UserAgent` + ponto de consulta no
+  `_get_squad_proposals`. É mais invasivo (mexe no contrato gRPC Core) — deixei
+  como **PR 2 separada** por segurança. **Confirmar se quer 1b agora** ou se 1a
+  (chat + gate) já atende "não só aprovador".
+
+## Fase 3/4 — decisão estratégica pendente
+
+- **[DÚVIDA — decisão do dono] Autonomia progressiva L1–L5.** A análise recomenda
+  MANTER descopada (ADR 0021): o próprio SquadIAds não usa o loop dele, e a UX
+  "humano é membro contínuo" torna a auto-promoção redundante. Mas era um dos 4
+  diferenciais do BuildToValue original. Implementei/implementarei autonomia como
+  **rótulo descritivo** (metadado consultável em `persona.v1`), NÃO como loop
+  automático. Se quiser readotar um dial Manual/Assistido/Autônomo de verdade, é
+  um **ADR novo explícito** que supersede o 0021 — não farei em silêncio.
+
+- **[nota] Descopes herdados que sigo respeitando:** `max_autonomy_level` continua
+  ignorado ponta-a-ponta (ADR 0021); `forge_squad/forgetting.py` segue código
+  morto. Não vou "ligar o campo" sem efeito real.
