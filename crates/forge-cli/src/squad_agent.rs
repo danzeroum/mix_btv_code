@@ -60,6 +60,13 @@ struct SquadTaskState {
     /// `ChatMessage`); a Fase 1b (`AwaitUserTurn`) as puxa como turno real do
     /// membro humano dentro do orquestrador.
     inbox: VecDeque<String>,
+    /// Kill-switch (Fase 3, Prioridade-Zero): quando `true`, a tarefa foi
+    /// parada por um `emergency_stop` — nenhum passo novo deve seguir.
+    stopped: bool,
+    /// Handle para abortar a task tokio que drena o stream do orquestrador —
+    /// registrado logo após o `spawn`. Parar de verdade um squad em execução
+    /// (não só marcar a flag) exige cancelar quem consome o stream gRPC.
+    abort: Option<tokio::task::AbortHandle>,
 }
 
 impl SquadTaskState {
@@ -70,6 +77,8 @@ impl SquadTaskState {
             tx: Some(tx),
             pending: None,
             inbox: VecDeque::new(),
+            stopped: false,
+            abort: None,
         }
     }
 }
@@ -220,6 +229,63 @@ impl SquadHub {
         let mut tasks = self.tasks.lock().expect("squad hub mutex poisoned");
         tasks.get_mut(task_id).and_then(|s| s.inbox.pop_front())
     }
+
+    /// Registra o handle de abort da task que roda o squad — chamado logo
+    /// depois do `spawn` em `run_squad_handler`. Idempotente: se a tarefa já
+    /// foi parada antes de registrar (corrida improvável), aborta na hora.
+    fn register_abort(&self, task_id: &str, abort: tokio::task::AbortHandle) {
+        let mut tasks = self.tasks.lock().expect("squad hub mutex poisoned");
+        if let Some(state) = tasks.get_mut(task_id) {
+            if state.stopped {
+                abort.abort();
+            } else {
+                state.abort = Some(abort);
+            }
+        }
+    }
+
+    /// Kill-switch (Fase 3, Prioridade-Zero): para um squad em execução. Marca
+    /// a flag, aborta a task que drena o stream, destrava qualquer gate HITL
+    /// pendente (negando, fail-closed) para não deixar o orquestrador
+    /// pendurado, publica um evento de erro visível e encerra o SSE. `Err` se
+    /// a tarefa não existe. Idempotente: parar de novo não faz mal.
+    pub fn emergency_stop(&self, task_id: &str, reason: &str) -> Result<(), ()> {
+        {
+            let mut tasks = self.tasks.lock().expect("squad hub mutex poisoned");
+            let Some(state) = tasks.get_mut(task_id) else {
+                return Err(());
+            };
+            state.stopped = true;
+            if let Some(abort) = state.abort.take() {
+                abort.abort();
+            }
+            // Destrava um gate pendente negando (fail-closed) — mesmo espírito
+            // do timeout de HITL (ADR 0017).
+            if let Some(pending) = state.pending.take() {
+                let _ = pending.responder.send(false);
+            }
+        }
+        // Fora do lock: publica o evento de parada e encerra o stream.
+        self.publish(
+            task_id,
+            SquadEvent {
+                task_id: task_id.to_string(),
+                ts: now_rfc3339(),
+                payload: Some(squad_event::Payload::Error(format!(
+                    "squad interrompido (kill-switch): {reason}"
+                ))),
+            },
+        );
+        self.finish_task(task_id);
+        Ok(())
+    }
+
+    /// Se a tarefa foi parada por kill-switch. Usada como checagem
+    /// Prioridade-Zero antes de seguir passos (ver `run_squad_task_inner`).
+    fn is_stopped(&self, task_id: &str) -> bool {
+        let tasks = self.tasks.lock().expect("squad hub mutex poisoned");
+        tasks.get(task_id).map(|s| s.stopped).unwrap_or(false)
+    }
 }
 
 /// `CoreBackend` real do agente web: `Generate` passa pelo `Gateway`/rate
@@ -315,15 +381,19 @@ async fn run_squad_task<B>(
         backend_for,
     )
     .await;
+    // Se foi parado por kill-switch, `emergency_stop` já publicou o evento de
+    // erro e encerrou — não republica (evita erro duplicado no stream).
     if let Err(reason) = outcome {
-        hub.publish(
-            &task_id,
-            SquadEvent {
-                task_id: task_id.clone(),
-                ts: now_rfc3339(),
-                payload: Some(squad_event::Payload::Error(reason)),
-            },
-        );
+        if !hub.is_stopped(&task_id) {
+            hub.publish(
+                &task_id,
+                SquadEvent {
+                    task_id: task_id.clone(),
+                    ts: now_rfc3339(),
+                    payload: Some(squad_event::Payload::Error(reason)),
+                },
+            );
+        }
     }
     // Sempre — sucesso ou erro — encerra o SSE de quem estiver conectado
     // (ver comentário em `SquadTaskState.tx`): sem isso, a conexão HTTP
@@ -398,6 +468,13 @@ where
 
     let mut failure: Option<String> = None;
     loop {
+        // Prioridade-Zero (kill-switch, Fase 3): antes de processar o próximo
+        // evento, checa se a tarefa foi parada. `emergency_stop` também aborta
+        // esta task diretamente; a checagem dá uma saída limpa quando a parada
+        // acontece entre eventos, sem depender só do abort abrupto.
+        if hub.is_stopped(&task_id) {
+            return Err("squad interrompido por kill-switch".into());
+        }
         match stream.message().await {
             Ok(Some(event)) => {
                 if let Some(squad_event::Payload::Consensus(c)) = &event.payload {
@@ -468,7 +545,7 @@ async fn run_squad_handler(
     let pool = state.pool.clone();
     let task_id_for_task = task_id.clone();
 
-    if std::env::var_os("FORGE_SCRIPTED").is_some() {
+    let handle = if std::env::var_os("FORGE_SCRIPTED").is_some() {
         tokio::spawn(run_squad_task(
             hub,
             pool,
@@ -476,7 +553,7 @@ async fn run_squad_handler(
             task_id_for_task,
             body.task,
             |hub, task_id| ScriptedSquadCoreBackend { hub, task_id },
-        ));
+        ))
     } else {
         let opts = crate::RunOpts {
             model: squad_model(),
@@ -507,8 +584,11 @@ async fn run_squad_handler(
                 hub,
                 task_id,
             },
-        ));
-    }
+        ))
+    };
+    // Registra o abort para o kill-switch (Fase 3) poder parar a task de
+    // verdade, não só marcar a flag.
+    state.hub.register_abort(&task_id, handle.abort_handle());
 
     (StatusCode::ACCEPTED, Json(RunSquadResponse { task_id })).into_response()
 }
@@ -596,6 +676,37 @@ async fn post_message_handler(
     }
 }
 
+#[derive(Deserialize)]
+struct EmergencyStopBody {
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// Kill-switch (Fase 3, governança): para um squad em execução imediatamente.
+/// Responde `200` se parou, `404` se a tarefa não existe. Idempotente. O
+/// motivo é opcional (default "solicitado pelo operador") e vai no evento de
+/// erro publicado no stream, ficando visível para todos os assinantes.
+async fn emergency_stop_handler(
+    State(state): State<SquadAgentState>,
+    Path(task_id): Path<String>,
+    body: Option<Json<EmergencyStopBody>>,
+) -> Response {
+    let reason = body
+        .and_then(|b| b.0.reason)
+        .unwrap_or_else(|| "solicitado pelo operador".into());
+    match state.hub.emergency_stop(&task_id, &reason) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(()) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody::new(
+                "task_not_found",
+                "tarefa de squad inexistente",
+            )),
+        )
+            .into_response(),
+    }
+}
+
 /// Router aditivo do squad ao vivo — `.merge()`ado ao router do agente web
 /// (mesma composição de `web_agent::merged_router`, mesma guarda de
 /// `Origin`/`Host`).
@@ -605,6 +716,10 @@ pub fn router(hub: SquadHub, pool: Arc<SquadPool>) -> Router {
         .route("/api/squad/{task_id}/events", get(squad_sse_handler))
         .route("/api/squad/{task_id}/hitl", post(resolve_hitl_handler))
         .route("/api/squad/{task_id}/message", post(post_message_handler))
+        .route(
+            "/api/squad/{task_id}/emergency-stop",
+            post(emergency_stop_handler),
+        )
         .with_state(SquadAgentState { hub, pool })
 }
 
@@ -735,6 +850,42 @@ mod tests {
     fn push_user_message_em_tarefa_inexistente_devolve_err() {
         let hub = SquadHub::new(Duration::from_millis(100));
         assert!(hub.push_user_message("nao-existe", "oi".into()).is_err());
+    }
+
+    #[test]
+    fn emergency_stop_marca_para_publica_erro_e_encerra() {
+        let hub = SquadHub::new(Duration::from_millis(100));
+        let _ = hub.subscribe("t1");
+        assert!(!hub.is_stopped("t1"));
+        assert!(hub.emergency_stop("t1", "teste").is_ok());
+        assert!(hub.is_stopped("t1"));
+        // Publicou um evento de erro com o motivo (visível no snapshot)...
+        let (snapshot, rx) = hub.subscribe("t1");
+        let err = snapshot.iter().find_map(|e| match &e.payload {
+            Some(squad_event::Payload::Error(m)) => Some(m.clone()),
+            _ => None,
+        });
+        assert!(err.unwrap().contains("kill-switch"));
+        // ...e encerrou o SSE (tx dropado → sem receiver ao vivo).
+        assert!(rx.is_none());
+    }
+
+    #[test]
+    fn emergency_stop_em_tarefa_inexistente_devolve_err() {
+        let hub = SquadHub::new(Duration::from_millis(100));
+        assert!(hub.emergency_stop("nao-existe", "x").is_err());
+    }
+
+    #[tokio::test]
+    async fn emergency_stop_destrava_gate_hitl_pendente_negando() {
+        let hub = SquadHub::new(Duration::from_secs(5));
+        let _ = hub.subscribe("t1");
+        let hub2 = hub.clone();
+        let handle = tokio::spawn(async move { hub2.request_hitl("t1").await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(hub.emergency_stop("t1", "parada").is_ok());
+        // O gate pendente foi negado (fail-closed), não ficou pendurado.
+        assert!(!handle.await.unwrap());
     }
 
     #[tokio::test]

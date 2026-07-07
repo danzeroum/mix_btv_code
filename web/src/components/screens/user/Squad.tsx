@@ -6,6 +6,7 @@ import { useAsyncAction } from '../../../hooks/useAsyncAction'
 import { useToast } from '../../primitives/Toast'
 import {
   connectSquadEvents,
+  emergencyStopSquad,
   postSquadMessage,
   resolveHitl,
   runSquad,
@@ -127,6 +128,16 @@ export function Squad() {
     }
   }
 
+  async function handleEmergencyStop() {
+    if (!taskId || !active) return
+    try {
+      await emergencyStopSquad(taskId, 'interrompido pelo operador')
+      toast.push('success', 'squad interrompido')
+    } catch {
+      toast.push('error', 'falha ao interromper o squad')
+    }
+  }
+
   async function handleSendMessage() {
     const text = chatDraft.trim()
     if (!taskId || !text || !active) return
@@ -162,6 +173,11 @@ export function Squad() {
         <Button onClick={() => void handleRunSquad()} disabled={busy}>
           {run.state.status === 'loading' ? 'disparando…' : active ? 'executando…' : 'rodar'}
         </Button>
+        {active && (
+          <Button variant="danger" onClick={() => void handleEmergencyStop()}>
+            interromper
+          </Button>
+        )}
       </div>
 
       {taskId && (

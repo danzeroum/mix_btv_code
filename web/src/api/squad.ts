@@ -105,6 +105,19 @@ export async function postSquadMessage(taskId: string, text: string): Promise<vo
   }
 }
 
+/** Kill-switch (Fase 3): para um squad em execução imediatamente. Responde
+ * `200` sem corpo. */
+export async function emergencyStopSquad(taskId: string, reason?: string): Promise<void> {
+  const response = await fetch(`/api/squad/${encodeURIComponent(taskId)}/emergency-stop`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  })
+  if (!response.ok) {
+    throw new ApiError(`falha ao interromper (${response.status})`, `http_${response.status}`)
+  }
+}
+
 export interface SquadEventHandlers {
   onEvent: (event: SquadEventEnvelope) => void
   onConnectionError?: () => void

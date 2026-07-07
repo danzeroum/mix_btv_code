@@ -1387,3 +1387,26 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
 - **[nota] Descopes herdados que sigo respeitando:** `max_autonomy_level` continua
   ignorado ponta-a-ponta (ADR 0021); `forge_squad/forgetting.py` segue código
   morto. Não vou "ligar o campo" sem efeito real.
+
+## Fase 3 — confiança e governança (parcial)
+
+- **[entregue] Kill-switch de squad (Prioridade-Zero).** `POST /api/squad/:id/
+  emergency-stop` para um squad em execução: aborta a task que drena o stream,
+  destrava gate HITL pendente (nega, fail-closed), publica evento de erro
+  visível, encerra o SSE. Checagem `is_stopped` no loop como saída limpa. Botão
+  "interromper" na tela Squad. Testes Rust (`emergency_stop_*`).
+- **[pendente — maior/mais sensível, precisa de revisão antes de autonomia
+  profunda] Restante da Fase 3:** HMAC por entrada no ledger (mexe em
+  `forge-store/ledger.rs`, código sensível — paridade de hash/append-only);
+  gates 4-estados + piso-crítico-irredutível + impacto regulatório (estende
+  `gates.evaluate`/`forge-verify`); separação produzir≠revisar≠aprovar
+  (motor de permissões); versionamento/expiração de template; Prompt Integrity
+  validator. Recomendo revisar as fases já mergeadas (1, 2a) e o kill-switch
+  antes de eu avançar nas mudanças de ledger/permissões — são o núcleo de
+  segurança e merecem seu aval.
+
+## Fase 4 — endurecimento (não iniciada)
+Espinha operacional (dep-graph/health/logging), consenso ponderado por
+confiança, Decisão→ADR, histerese, gate Spec-First, placar what-matters,
+roteamento por problema, modo local. Fica para depois do aval das fases de
+governança.
