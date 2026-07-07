@@ -14,6 +14,7 @@
 pub mod config;
 pub mod exec;
 pub mod parsers;
+pub mod prompt_integrity;
 pub mod vetter;
 
 use forge_schemas::verification::{Finding, VerificationEvidence, VerificationStep};
