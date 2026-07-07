@@ -39,8 +39,33 @@ struct AppState {
     telemetry: Telemetry,
     prompt_library: Arc<Mutex<PromptLibrary>>,
     ledger: Arc<Mutex<LedgerStore>>,
-    /// Raiz do workspace — para enumerar/vetar skills em `/api/skills`.
+    /// Raiz do workspace — para enumerar/vetar skills em `/api/skills` e
+    /// resolver `forge.toml`/`git rev-parse` do `/verify`.
     root: PathBuf,
+    /// Job de `/verify` em background (Fase 7 Onda 11) — só 1 slot, em
+    /// memória (reinício do servidor perde o job em andamento; aceitável,
+    /// documentado na tela). Não é um parâmetro de `router()`: é estado
+    /// puramente interno do dashboard, sem persistência externa.
+    verify_job: VerifyJobSlot,
+}
+
+type VerifyJobSlot = Arc<Mutex<Option<VerifyJob>>>;
+
+#[derive(Clone)]
+struct VerifyJob {
+    run_id: String,
+    status: VerifyJobStatus,
+}
+
+#[derive(Clone)]
+enum VerifyJobStatus {
+    Running {
+        step: usize,
+        total: usize,
+    },
+    Done {
+        evidence: forge_schemas::verification::VerificationEvidence,
+    },
 }
 
 /// Corpo de erro uniforme das rotas mutáveis — mesma forma que `forge-cli`'s
@@ -91,12 +116,15 @@ pub fn router(
         .route("/api/models/usage", get(model_usage))
         .route("/api/experiment/{nome}", get(get_experiment))
         .route("/api/ratelimit", get(rate_limits))
+        .route("/api/verify/run", post(run_verify_start))
+        .route("/api/verify/{id}", get(get_verify_status))
         .fallback_service(serve_dir)
         .with_state(AppState {
             telemetry,
             prompt_library,
             ledger,
             root: root.as_ref().to_path_buf(),
+            verify_job: Arc::new(Mutex::new(None)),
         })
         .layer(middleware::from_fn(require_local_origin))
 }
@@ -278,6 +306,140 @@ async fn rate_limits() -> impl IntoResponse {
         })
         .collect();
     Json(entries)
+}
+
+#[derive(Serialize)]
+struct VerifyRunStarted {
+    run_id: String,
+}
+
+/// `POST /api/verify/run` (Fase 7 Onda 11) — dispara o pipeline `/verify`
+/// em background (`spawn_blocking`, os passos são subprocessos reais e
+/// bloqueantes) usando a MESMA config que `forge verify`: `forge.toml` na
+/// raiz do workspace, ou `default_steps()` (espelha o job `rust` do CI) na
+/// ausência dele — não uma segunda fonte de verdade sobre o que roda. A
+/// resposta imediata é só o `run_id`; o cliente acompanha via `GET
+/// /api/verify/:id` (polling). Execuções concorrentes são serializadas: só
+/// 1 job por vez — `409` com o `run_id` já em andamento em vez de dois
+/// pipelines disputando o mesmo `target/`.
+async fn run_verify_start(State(state): State<AppState>) -> Response {
+    {
+        let guard = state.verify_job.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(job) = guard.as_ref() {
+            if matches!(job.status, VerifyJobStatus::Running { .. }) {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(VerifyRunStarted {
+                        run_id: job.run_id.clone(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let run_id = new_verify_run_id();
+    {
+        let mut guard = state.verify_job.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(VerifyJob {
+            run_id: run_id.clone(),
+            status: VerifyJobStatus::Running { step: 0, total: 0 },
+        });
+    }
+
+    let job_slot = Arc::clone(&state.verify_job);
+    let root = state.root.clone();
+    let run_id_for_task = run_id.clone();
+    tokio::task::spawn_blocking(move || {
+        let config_path = root.join("forge.toml");
+        let steps = match forge_verify::config::load_config(&config_path) {
+            Ok(Some(cfg)) => cfg.to_step_specs(),
+            _ => forge_verify::config::default_steps(),
+        };
+        let sha = verify_git_sha(&root).unwrap_or_else(|| "unknown".to_string());
+        let produced_at = now_rfc3339();
+        let progress_slot = Arc::clone(&job_slot);
+        let evidence = forge_verify::run_pipeline_with_progress(
+            &run_id_for_task,
+            &sha,
+            &produced_at,
+            &steps,
+            move |step, total, _completed| {
+                let mut guard = progress_slot.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(job) = guard.as_mut() {
+                    job.status = VerifyJobStatus::Running { step, total };
+                }
+            },
+        );
+        let mut guard = job_slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(job) = guard.as_mut() {
+            job.status = VerifyJobStatus::Done { evidence };
+        }
+    });
+
+    (StatusCode::ACCEPTED, Json(VerifyRunStarted { run_id })).into_response()
+}
+
+/// `GET /api/verify/:id` — status do job (polling). `404` se não houver
+/// nenhum job, ou se `id` não bater com o job atual (só 1 slot — um job novo
+/// substitui o anterior, e um reinício do servidor perde o registro).
+async fn get_verify_status(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let guard = state.verify_job.lock().unwrap_or_else(|e| e.into_inner());
+    match guard.as_ref() {
+        Some(job) if job.run_id == id => match &job.status {
+            VerifyJobStatus::Running { step, total } => Json(serde_json::json!({
+                "status": "running",
+                "run_id": job.run_id,
+                "step": step,
+                "total": total,
+            }))
+            .into_response(),
+            VerifyJobStatus::Done { evidence } => Json(serde_json::json!({
+                "status": "done",
+                "run_id": job.run_id,
+                "evidence": evidence,
+            }))
+            .into_response(),
+        },
+        _ => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody::new(
+                "verify_run_not_found",
+                format!("run '{id}' não encontrado"),
+            )),
+        )
+            .into_response(),
+    }
+}
+
+fn new_verify_run_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("run-{:x}", nanos & 0xffff_ffff_ffff)
+}
+
+/// Mesma lógica de `forge-cli`'s `git_sha()` (duplicada, não importada —
+/// direção de dependência oposta), só que com `current_dir` explícito em vez
+/// de confiar no cwd ambiente do processo: o dashboard resolve tudo contra
+/// `state.root`, não o cwd real do binário.
+fn verify_git_sha(root: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// Lista as skills (built-in de `skills/` + terceiro de `.forge/skills/`) com o
@@ -1323,5 +1485,170 @@ mod tests {
             assert_eq!(entry["cap"], expected.max_requests());
             assert_eq!(entry["window_secs"], expected.window().as_secs());
         }
+    }
+
+    fn write_fast_forge_toml(root: &std::path::Path, step_count: usize, sleep_secs: &str) {
+        let mut toml = String::new();
+        for i in 0..step_count {
+            toml.push_str(&format!(
+                "[[step]]\nname = \"passo{i}\"\nprogram = \"sh\"\nargs = [\"-c\", \"sleep {sleep_secs}\"]\n\n"
+            ));
+        }
+        std::fs::write(root.join("forge.toml"), toml).unwrap();
+    }
+
+    /// Fronteira da Onda 11: um pipeline fixture com passos curtos reportado
+    /// via polling real — o status muda "rodando" (com `step` crescente) até
+    /// "concluído", provando progresso de verdade (não um placeholder que
+    /// pula direto pro fim).
+    #[tokio::test]
+    async fn verify_run_reporta_progresso_real_via_polling_ate_concluir() {
+        let dir = tempfile::tempdir().unwrap();
+        write_fast_forge_toml(dir.path(), 3, "0.05");
+
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            ledger_vazio(),
+            dir.path(),
+            web_dir.path(),
+        );
+
+        let start_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/verify/run")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(start_resp.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(start_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let started: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let run_id = started["run_id"].as_str().unwrap().to_string();
+
+        let mut saw_running_with_progress = false;
+        let mut final_json: Option<serde_json::Value> = None;
+        for _ in 0..200 {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/verify/{run_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            if json["status"] == "running" && json["step"].as_u64().unwrap_or(0) > 0 {
+                saw_running_with_progress = true;
+            }
+            if json["status"] == "done" {
+                final_json = Some(json);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        assert!(
+            saw_running_with_progress,
+            "deveria ter visto ao menos um passo em progresso antes de concluir"
+        );
+        let final_json =
+            final_json.expect("job deveria ter concluído dentro do orçamento do teste");
+        assert_eq!(final_json["run_id"], run_id);
+        let evidence = &final_json["evidence"];
+        assert_eq!(evidence["steps"].as_array().unwrap().len(), 3);
+        assert_eq!(evidence["verdict"], "pass");
+    }
+
+    /// Fronteira da Onda 11: um segundo `POST /api/verify/run` enquanto o
+    /// primeiro ainda roda recebe `409` com o `run_id` do job já em
+    /// andamento — nunca dois pipelines disputando o mesmo `target/`.
+    #[tokio::test]
+    async fn segundo_post_verify_com_job_ativo_recebe_409() {
+        let dir = tempfile::tempdir().unwrap();
+        write_fast_forge_toml(dir.path(), 1, "0.5");
+
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            ledger_vazio(),
+            dir.path(),
+            web_dir.path(),
+        );
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/verify/run")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(first.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let first_run_id = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["run_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let second = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/verify/run")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(second.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let second_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(second_json["run_id"], first_run_id);
+    }
+
+    /// `id` que não bate com nenhum job (ou nunca existiu) é `404` — não um
+    /// estado "running" fabricado.
+    #[tokio::test]
+    async fn verify_status_de_id_desconhecido_e_404() {
+        let web_dir = fixture_web_dir();
+        let app = router(
+            Telemetry::open_in_memory().unwrap(),
+            prompt_library_vazia(),
+            ledger_vazio(),
+            web_dir.path(),
+            web_dir.path(),
+        );
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/verify/run-nao-existe")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }

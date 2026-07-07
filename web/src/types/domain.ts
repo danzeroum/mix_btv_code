@@ -64,13 +64,6 @@ export interface LedgerEntry {
   ts: string
 }
 
-export interface VerifyStep {
-  name: string
-  detail: string
-  ok: boolean
-  evidence: Record<string, unknown>
-}
-
 export interface ReviewerScore {
   name: string
   score: number

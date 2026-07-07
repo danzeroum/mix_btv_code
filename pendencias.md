@@ -864,3 +864,75 @@ ADR 0019, sem decisão em aberto que precisasse deste arquivo.
   `providers.ts`'s `RATE_LIMITS` fabricado **não foi tocado** nesta onda —
   aposentá-lo é trabalho explícito da Onda 12 (Providers), que reusa a
   mesma leitura de tetos por tier que esta onda construiu.
+
+## Onda 11 — Verify (job em background)
+
+- **[decisão] `/api/verify/run`+`/api/verify/:id` foram direto em
+  `forge-server`, não no router mesclado de `forge-cli`** — "zero
+  dependência" no próprio título da onda no plano-mestre: `forge-verify` já
+  é dependência de `forge-server` desde sempre (usado por `/api/skills`'s
+  `list_skill_statuses`), então nenhuma dependência nova entrou.
+  `run_verify_pipeline` (a função equivalente já existente em
+  `forge-cli/src/main.rs`, compartilhada entre `forge verify` e `forge
+  squad`) não foi importada — não dá (direção de dependência oposta,
+  mesma regra que já vale para `ErrorBody`/`now_rfc3339`) — a resolução de
+  `forge.toml`/`default_steps()` e os helpers `git_sha`/`novo run_id` foram
+  duplicados em `forge-server`, mesmo padrão já estabelecido no resto do
+  crate.
+- **[decisão] `run_pipeline_with_progress` novo em `forge-verify`, `run_pipeline`
+  virou este mesmo laço com callback vazio.** Evita duplicar a lógica de
+  execução — só o refactor mínimo pra abrir um ponto de progresso por passo,
+  sem mudar o comportamento de `run_pipeline` (mesmos testes existentes
+  continuam passando, mais 1 teste novo provando que o callback é chamado
+  na ordem certa com `(passo, total)` corretos).
+- **[decisão] Estado do job é 1 slot em memória (`Arc<Mutex<Option<VerifyJob>>>`),
+  não um parâmetro de `router()`.** Diferente de telemetria/ledger/prompt
+  library (stores externos, passados de fora, sobrevivem a reinício), o job
+  de verify não tem por que persistir — é união com o próprio processo do
+  dashboard. Construído inline dentro de `router()` (`Arc::new(Mutex::new(None))`),
+  sem alargar a assinatura pública da função nem os call-sites existentes em
+  `forge-cli`/testes.
+- **[decisão] `POST` concorrente com job ativo é `409` com o `run_id` já em
+  andamento — não um job novo, nem erro genérico.** Provado pela fronteira:
+  2 POSTs em sequência rápida contra um pipeline de 1 passo de 500ms — o
+  segundo chega bem antes do primeiro terminar e recebe exatamente o mesmo
+  `run_id` do primeiro. Cliente (`api/verify.ts::startVerifyRun`) trata 202 e
+  409 de forma idêntica — os dois dão um `run_id` pra acompanhar, a UI não
+  precisa saber se foi ela que iniciou o job ou se só "entrou" num já rodando.
+- **[decisão/risco aceito] `spawn_blocking`'s `JoinHandle` não é aguardado —
+  um panic dentro do pipeline deixaria o job preso em "running" pra
+  sempre, sem crash visível em lugar nenhum.** Considerei
+  `std::panic::catch_unwind` em volta da chamada, mas todo caminho de falha
+  já documentado em `run_step`/`exec::run_with_timeout` devolve `Result`,
+  nunca panica (testes existentes: `programa_inexistente_falha_sem_panicar`,
+  `passo_com_timeout_estourado_falha_com_finding_e_exit_code_sentinela`) —
+  um panic só viria de um bug de verdade no meu código novo de glue, que os
+  testes desta onda já exercitam. Aceitei o risco residual em vez de
+  adicionar `catch_unwind` só por precaução; documentado aqui, não escondido.
+- **[decisão] Teste de fronteira do progresso usa polling REAL (sleep de
+  20ms entre tentativas, até 200 iterações), não tempo mockado.** O job roda
+  de verdade em `spawn_blocking` (thread real, subprocessos reais via `sh -c
+  sleep`) — diferente de `rate_limit.rs`'s testes (`#[tokio::test(start_paused
+  = true)]`, tempo virtual), aqui não dá pra pausar o relógio porque o
+  progresso depende de um subprocesso do SO de verdade terminando. Passos de
+  50ms (3 passos = ~150ms) mantêm o teste rápido sem ficar flaky.
+- **[decisão] Frontend: `VerifyPoller` como subcomponente que só existe
+  enquanto há um `run_id` ativo** (`{activeRunId && <VerifyPoller .../>}`),
+  em vez de tentar fazer `usePolling` (hook existente, reusado sem
+  modificação) parar sozinho. Montar/desmontar via o `run_id` no estado do
+  pai é o jeito idiomático de "start/stop" um hook que só sabe repetir para
+  sempre — quando o job termina (`status: "done"`), o pai zera `activeRunId`,
+  o subcomponente desmonta, o `setInterval` é limpo pelo cleanup do próprio
+  `usePolling`.
+- **[decisão] `VerifyStep` (tipo mock antigo) removido de `types/domain.ts`**
+  — substituído por `VerificationEvidence`/`VerificationStep`/`Finding` reais
+  em `api/verify.ts` (mesmo padrão de `api/experiments.ts`: DTO que espelha
+  `forge_schemas` mora no módulo de api, não em `domain.ts`). `ReviewerScore`
+  continua em `domain.ts` — ainda usado pela seção mock de "Review por
+  valor", que esta onda não tocou (fora de escopo, ver próximo item).
+- **[não-escopo explícito] "Review por valor" (`REVIEWERS`/`VALUE_SCORE`/
+  `VALUE_GATE`) continua mock.** O plano-mestre desta onda só cobre o job de
+  `/verify` em si; ligar `forge_review`'s `gates`/`certification` reais é
+  trabalho não pedido aqui — mantive os mocks intactos (só migrados de
+  `api/verify.ts` pro mesmo arquivo, já que o módulo inteiro foi reescrito)
+  com um comentário explícito marcando o não-escopo, não deixado implícito.

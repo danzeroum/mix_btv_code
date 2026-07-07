@@ -80,7 +80,27 @@ pub fn run_pipeline(
     produced_at: &str,
     steps: &[StepSpec],
 ) -> VerificationEvidence {
-    let executed: Vec<VerificationStep> = steps.iter().map(run_step).collect();
+    run_pipeline_with_progress(run_id, git_sha, produced_at, steps, |_, _, _| {})
+}
+
+/// Como `run_pipeline`, mas invoca `on_step(passo_concluido, total, &step)`
+/// depois de cada passo — usado pelo job em background do dashboard (Fase 7
+/// Onda 11) para reportar progresso via polling sem esperar o pipeline
+/// inteiro terminar. `run_pipeline` é este mesmo laço com um callback vazio.
+pub fn run_pipeline_with_progress(
+    run_id: &str,
+    git_sha: &str,
+    produced_at: &str,
+    steps: &[StepSpec],
+    mut on_step: impl FnMut(usize, usize, &VerificationStep),
+) -> VerificationEvidence {
+    let total = steps.len();
+    let mut executed = Vec::with_capacity(total);
+    for (i, spec) in steps.iter().enumerate() {
+        let step = run_step(spec);
+        on_step(i + 1, total, &step);
+        executed.push(step);
+    }
     let verdict = VerificationEvidence::derive_verdict(&executed);
     VerificationEvidence {
         run_id: run_id.to_string(),
@@ -208,6 +228,32 @@ mod tests {
             evidence.steps[0].findings[0].file.as_deref(),
             Some("src/main.rs")
         );
+    }
+
+    #[test]
+    fn run_pipeline_with_progress_reporta_cada_passo_em_ordem() {
+        let mut seen = Vec::new();
+        let evidence = run_pipeline_with_progress(
+            "run-progress",
+            "sha",
+            "ts",
+            &[
+                StepSpec::new("um", "true", vec![]),
+                StepSpec::new("dois", "true", vec![]),
+                StepSpec::new("tres", "false", vec![]),
+            ],
+            |step, total, s| seen.push((step, total, s.name.clone())),
+        );
+        assert_eq!(
+            seen,
+            vec![
+                (1, 3, "um".to_string()),
+                (2, 3, "dois".to_string()),
+                (3, 3, "tres".to_string()),
+            ]
+        );
+        assert_eq!(evidence.steps.len(), 3);
+        assert!(matches!(evidence.verdict, Verdict::Fail));
     }
 
     #[test]

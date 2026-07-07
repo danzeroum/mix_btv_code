@@ -149,6 +149,18 @@ writeFileSync(
     'entrypoint = \'echo "oi"\'\npermissions = []\n',
 )
 
+// 3i. `forge.toml` na RAIZ do workDir (Fase 7 Onda 11) — não em `.forge/`:
+// `/api/verify/run` resolve `forge.toml` contra `state.root`, que é o `cwd`
+// do processo do dashboard (`workDir` aqui), o mesmo lugar que `forge
+// verify` (CLI) já olha. Passos curtos e determinísticos (não os comandos
+// reais de `default_steps()`, que levariam minutos) — o teste prova
+// progresso real via polling, não que o cargo real roda de novo aqui.
+writeFileSync(
+  join(workDir, 'forge.toml'),
+  '[[step]]\nname = "passo-um"\nprogram = "sh"\nargs = ["-c", "sleep 0.2"]\n\n' +
+    '[[step]]\nname = "passo-dois"\nprogram = "sh"\nargs = ["-c", "sleep 0.2"]\n',
+)
+
 // 4. sobe o dashboard real apontando pro build da SPA, servindo o evento semeado.
 // --manifest-path resolve o workspace a partir de workDir (cargo não muda o
 // cwd do processo filho); run_dashboard lê `.forge/telemetry.db` relativo ao
