@@ -21,6 +21,7 @@ from forge_proto import core_pb2_grpc
 
 from forge_squad.gateway import LlmRequest, LlmResponse
 from forge_squad.permission import PermissionDecision, PermissionRequest
+from forge_squad.tool_client import ToolCallRequest, ToolCallResult
 
 
 class GrpcGatewayClient:
@@ -84,3 +85,24 @@ class GrpcPermissionClient:
         approved = decision.decision == core_pb2.PermissionDecision.ALLOW
         note = decision.operator_note if decision.HasField("operator_note") else None
         return PermissionDecision(approved=approved, operator_note=note)
+
+
+class GrpcToolClient:
+    """`ToolClient` sobre `CoreService.RunTool` — execução real de
+    ferramenta do lado Rust ("tool execution architecture", Onda 1/2)."""
+
+    def __init__(self, channel) -> None:
+        self._stub = core_pb2_grpc.CoreServiceStub(channel)
+
+    async def run_tool(self, request: ToolCallRequest) -> ToolCallResult:
+        proto_req = core_pb2.ToolCall(
+            tool=request.tool,
+            args_json=request.args_json,
+            scope=request.scope,
+        )
+        result = await self._stub.RunTool(proto_req)
+        return ToolCallResult(
+            content=result.content,
+            truncated=result.truncated,
+            exit_code=result.exit_code,
+        )

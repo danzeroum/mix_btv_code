@@ -3,10 +3,12 @@ import json
 
 import pytest
 
+from forge_squad.agents.developer import _MAX_REACT_STEPS
 from forge_squad.gateway import LlmRequest, LlmResponse
 from forge_squad.memory import AgentMemorySystem
 from forge_squad.orchestrator import UnifiedOrchestrator
 from forge_squad.permission import PermissionDecision, ScriptedPermissionClient
+from forge_squad.tool_client import ScriptedToolClient, ToolCallResult
 
 
 class RoutingGatewayClient:
@@ -245,3 +247,70 @@ def test_propostas_sao_envolvidas_em_proposal_e_consenso_computa(tmp_path):
     result = asyncio.run(orch.execute_complex_task({"description": "tarefa"}))
     assert result["consensus"]["decision_maker"] in {"architect", "developer", "auditor"}
     assert 0.0 <= result["consensus"]["consensus_strength"] <= 1.0
+
+
+def test_passo_implement_paralelizavel_ainda_ativa_tool_client_do_developer(tmp_path):
+    # Achado real (revisão do plano): `_can_parallelize` devolve True para
+    # um passo "implement" sem `dependencies` — o caso comum de um plano de
+    # 1 passo — e `_extract_parallel_tasks` chamava o developer SEM
+    # "action", então o sinal de ativação do loop ReAct
+    # (`DeveloperAgent.execute`) nunca disparava nesse caminho: era
+    # exatamente o caminho que reproduzia o bug original (squad não
+    # materializa arquivo) mesmo depois de RunTool/loop ReAct existirem.
+    # Sem o fix em `_extract_parallel_tasks` (propagar action/prior_results,
+    # mesma forma do `step_task` sequencial), este teste falha porque o
+    # tool_client nunca é chamado.
+    tool_call_turn = json.dumps({"action": "tool_call", "tool": "bash", "args": {"command": "echo oi"}})
+    gateway = RoutingGatewayClient(
+        {
+            "planner": LlmResponse(
+                text=json.dumps(
+                    {
+                        "steps": [
+                            {
+                                "step": 1,
+                                "action": "implement",
+                                "description": "criar arquivo",
+                                "estimated_time": 5,
+                                "dependencies": [],
+                                "can_fail": True,
+                            }
+                        ],
+                        "estimated_duration": 5,
+                        "confidence": 0.8,
+                    }
+                )
+            ),
+            "architect": LlmResponse(
+                text=json.dumps(
+                    {"problem_analysis": "x", "recommendation": "y", "architecture": "z", "components": [], "confidence": 0.9}
+                )
+            ),
+            "developer": LlmResponse(text=tool_call_turn),
+            "auditor": LlmResponse(
+                text=json.dumps(
+                    {"passed": True, "approved": True, "confidence": 0.9, "notes": "ok", "issues": [], "agent_scores": {}, "additional_checks": []}
+                )
+            ),
+            "designer": LlmResponse(text=json.dumps({"pattern": "x", "components": [], "confidence": 0.8})),
+        }
+    )
+    # `developer` está roteirizado pra sempre devolver o mesmo tool_call (o
+    # `RoutingGatewayClient` não é uma fila) — o loop ReAct esgota
+    # `_MAX_REACT_STEPS` sem nunca ver um final_answer; irrelevante pro que
+    # este teste prova (só que o tool_client FOI chamado), então provisiona
+    # resultados suficientes pra não esgotar o `ScriptedToolClient` antes.
+    tool_client = ScriptedToolClient(
+        [ToolCallResult(content="oi", exit_code=0) for _ in range(_MAX_REACT_STEPS)]
+    )
+    orch = UnifiedOrchestrator(
+        gateway,
+        permission_client=ScriptedPermissionClient([PermissionDecision(approved=True)]),
+        memory=AgentMemorySystem(storage_dir=tmp_path),
+        tool_client=tool_client,
+    )
+
+    asyncio.run(orch.execute_complex_task({"description": "criar arquivo real"}))
+
+    assert len(tool_client.requests) >= 1, "regressão do fix de _extract_parallel_tasks (action/prior_results)"
+    assert tool_client.requests[0].tool == "bash"

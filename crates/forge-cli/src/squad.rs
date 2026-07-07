@@ -8,7 +8,7 @@ use crate::session::{now_rfc3339, Session};
 use crate::{run_once, RunOpts};
 use anyhow::Result;
 use forge_core::{Decision, PermissionEngine};
-use forge_llm::chat::{ChatMessage, GenerateRequest};
+use forge_llm::chat::{ChatMessage, ContentBlock, GenerateRequest, Role};
 use forge_llm::Generator;
 use forge_proto::core::{PermissionRequest, ToolCall, ToolResult};
 use forge_proto::llm::{LlmRequest, Usage};
@@ -188,13 +188,24 @@ pub(crate) async fn core_generate<G: Generator>(
     let mut system = String::new();
     let mut chat = Vec::new();
     for m in msgs {
-        if m.role == "system" {
-            if !system.is_empty() {
-                system.push('\n');
+        match m.role.as_str() {
+            "system" => {
+                if !system.is_empty() {
+                    system.push('\n');
+                }
+                system.push_str(&m.content);
             }
-            system.push_str(&m.content);
-        } else {
-            chat.push(ChatMessage::user_text(&m.content));
+            // Loop ReAct do squad (Onda 2) manda histórico multi-turno de
+            // verdade — sem isto, um "assistant" cairia em `Role::User` e a
+            // API da Anthropic (que exige alternância estrita user/
+            // assistant) recusaria/malformaria a conversa. Todo caller
+            // anterior mandava só 1 system + 1 user, então este ramo nunca
+            // foi exercitado antes do loop ReAct existir.
+            "assistant" => chat.push(ChatMessage {
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text { text: m.content }],
+            }),
+            _ => chat.push(ChatMessage::user_text(&m.content)),
         }
     }
     let gen_req = GenerateRequest {
@@ -504,4 +515,70 @@ fn safe_mode(task: &str) {
          nenhuma ação de escrita foi tomada. Configure um provider (ANTHROPIC_API_KEY etc.) \
          ou o sidecar Python para reativar squad/agente-único."
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_llm::chat::{AssistantTurn, StopReason, Usage as ChatUsage};
+    use forge_llm::gateway::GatewayError;
+    use std::sync::Mutex;
+
+    /// Gerador de teste que só registra as `messages` recebidas — usado
+    /// para provar o mapeamento de papel de `core_generate` (Onda 2), sem
+    /// precisar de um provider real.
+    struct RecordingGenerator {
+        received: Mutex<Vec<Vec<ChatMessage>>>,
+    }
+
+    impl Generator for RecordingGenerator {
+        async fn generate(
+            &self,
+            req: GenerateRequest,
+            _on_delta: &mut (dyn FnMut(&str) + Send),
+        ) -> Result<AssistantTurn, GatewayError> {
+            self.received.lock().unwrap().push(req.messages);
+            Ok(AssistantTurn {
+                content: vec![ContentBlock::Text { text: "ok".into() }],
+                stop_reason: StopReason::EndTurn,
+                usage: ChatUsage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+                provider: "recording".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn core_generate_mapeia_papel_assistant_para_role_assistant() {
+        let generator = RecordingGenerator {
+            received: Mutex::new(Vec::new()),
+        };
+        let messages_json = serde_json::to_string(&serde_json::json!([
+            {"role": "system", "content": "prompt de sistema"},
+            {"role": "user", "content": "tarefa"},
+            {"role": "assistant", "content": "{\"action\":\"tool_call\"}"},
+            {"role": "user", "content": "observação"},
+        ]))
+        .unwrap();
+        let req = LlmRequest {
+            model: "m".into(),
+            messages_json,
+            temperature: None,
+            max_tokens: None,
+            requester: "developer".into(),
+        };
+
+        core_generate(&generator, &req).await.expect("generate ok");
+
+        let received = generator.received.lock().unwrap();
+        let messages = &received[0];
+        // system não entra em `messages` (vira `GenerateRequest.system`) —
+        // só as duas mensagens de chat + a de assistant sobram, na ordem.
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, Role::User);
+        assert_eq!(messages[1].role, Role::Assistant);
+        assert_eq!(messages[2].role, Role::User);
+    }
 }

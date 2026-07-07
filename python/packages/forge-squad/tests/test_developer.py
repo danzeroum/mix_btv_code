@@ -1,8 +1,9 @@
 import asyncio
 import json
 
-from forge_squad.agents.developer import DeveloperAgent
+from forge_squad.agents.developer import _MAX_REACT_STEPS, DeveloperAgent
 from forge_squad.gateway import LlmResponse, ScriptedGatewayClient
+from forge_squad.tool_client import ScriptedToolClient, ToolCallResult
 
 
 def test_execute_deriva_saida_real_do_gateway():
@@ -83,3 +84,65 @@ def test_generate_code_com_review_system_aprovado_usa_codigo_revisado():
     code = asyncio.run(agent.generate_code({"description": "hello world"}))
 
     assert code == "print('oi revisado')"
+
+
+def test_execute_com_action_usa_tool_client_e_faz_tool_call_antes_do_final_answer():
+    tool_call_turn = json.dumps(
+        {"action": "tool_call", "tool": "bash", "args": {"command": "echo oi > out.txt"}}
+    )
+    final_turn = json.dumps(
+        {
+            "action": "final_answer",
+            "final_output": "arquivo criado",
+            "status": "completed",
+            "confidence": 0.9,
+            "notes": "verificado com cat",
+        }
+    )
+    agent = DeveloperAgent()
+    agent.attach_gateway(
+        ScriptedGatewayClient([LlmResponse(text=tool_call_turn), LlmResponse(text=final_turn)])
+    )
+    tool_client = ScriptedToolClient([ToolCallResult(content="oi\n", exit_code=0)])
+    agent.attach_tool_client(tool_client)
+
+    result = asyncio.run(agent.execute({"description": "crie out.txt", "action": "implement"}))
+
+    assert len(tool_client.requests) == 1
+    assert tool_client.requests[0].tool == "bash"
+    assert json.loads(tool_client.requests[0].args_json) == {"command": "echo oi > out.txt"}
+    assert result["status"] == "completed"
+    assert result["final_output"] == "arquivo criado"
+    assert len(result["tool_calls"]) == 1
+    assert result["tool_calls"][0]["exit_code"] == 0
+
+
+def test_execute_sem_action_nao_usa_tools_mesmo_com_tool_client_anexado():
+    payload = {"final_output": "código", "status": "completed", "confidence": 0.8}
+    agent = DeveloperAgent()
+    agent.attach_gateway(ScriptedGatewayClient([LlmResponse(text=json.dumps(payload))]))
+    tool_client = ScriptedToolClient([ToolCallResult(content="não deveria ser chamado")])
+    agent.attach_tool_client(tool_client)
+
+    # Estilo proposta/avaliação (`_get_squad_proposals`) — sem "action".
+    result = asyncio.run(agent.execute({"description": "avalie a tarefa X"}))
+
+    assert tool_client.requests == []
+    assert result["final_output"] == "código"
+    assert "tool_calls" not in result  # caminho antigo de chamada única, formato intacto
+
+
+def test_react_loop_esgota_passos_sem_final_answer_devolve_incomplete_honesto():
+    tool_call_turn = json.dumps({"action": "tool_call", "tool": "bash", "args": {"command": "ls"}})
+    agent = DeveloperAgent()
+    agent.attach_gateway(ScriptedGatewayClient([LlmResponse(text=tool_call_turn)] * _MAX_REACT_STEPS))
+    tool_client = ScriptedToolClient(
+        [ToolCallResult(content="arquivo.txt", exit_code=0) for _ in range(_MAX_REACT_STEPS)]
+    )
+    agent.attach_tool_client(tool_client)
+
+    result = asyncio.run(agent.execute({"description": "tarefa sem fim", "action": "implement"}))
+
+    assert result["status"] == "incomplete"
+    assert result["final_output"] == ""
+    assert len(result["tool_calls"]) == _MAX_REACT_STEPS
